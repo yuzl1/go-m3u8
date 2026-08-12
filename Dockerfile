@@ -1,10 +1,12 @@
 # Stage 1: Build Go binary
 FROM golang:alpine AS builder
+ENV GO111MODULE=on
+ENV GOPROXY=https://proxy.golang.org,direct
 WORKDIR /app
 COPY go.mod go.sum ./
-RUN go mod download
+RUN go mod download -x
 COPY . .
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o go-m3u8 .
+RUN go env && CGO_ENABLED=0 go build -mod=mod -ldflags="-s -w" -o go-m3u8 .
 
 # Stage 2: Runtime with N_m3u8DL-RE + ffmpeg
 FROM ubuntu:24.04
