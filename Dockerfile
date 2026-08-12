@@ -10,18 +10,21 @@ FROM ubuntu:24.04
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ffmpeg \
-        wget \
+        curl \
         ca-certificates \
         xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
-ARG NM3U8DL_VERSION=0.6.0-beta
-RUN wget -q "https://github.com/nilaoda/N_m3u8DL-RE/releases/download/v${NM3U8DL_VERSION}/N_m3u8DL-RE_linux-x64_${NM3U8DL_VERSION}.tar.gz" \
-        -O /tmp/nm3u8dl.tar.gz \
+# Download N_m3u8DL-RE via GitHub API (auto-resolves latest release + correct filename)
+RUN curl -sL "https://api.github.com/repos/nilaoda/N_m3u8DL-RE/releases/latest" \
+        -o /tmp/release.json \
+    && DOWNLOAD_URL=$(grep -o '"browser_download_url": *"[^"]*linux-x64[^"]*"' /tmp/release.json | head -1 | sed 's/.*"\(https:.*\)"/\1/') \
+    && echo "Downloading: $DOWNLOAD_URL" \
+    && curl -sL "$DOWNLOAD_URL" -o /tmp/nm3u8dl.tar.gz \
     && mkdir -p /opt/nm3u8dl \
     && tar -xzf /tmp/nm3u8dl.tar.gz -C /opt/nm3u8dl \
     && chmod +x /opt/nm3u8dl/N_m3u8DL-RE \
-    && rm /tmp/nm3u8dl.tar.gz
+    && rm /tmp/nm3u8dl.tar.gz /tmp/release.json
 
 ENV PATH="/opt/nm3u8dl:${PATH}"
 
