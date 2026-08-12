@@ -212,7 +212,7 @@ func (h *Handler) ListFiles(w http.ResponseWriter, r *http.Request) {
 	cfg := h.Config.Get()
 	dir := cfg.SaveDir
 	if dir == "" {
-		dir = "./downloads"
+		dir = "/downloads"
 	}
 	if !filepath.IsAbs(dir) {
 		if abs, err := filepath.Abs(dir); err == nil {

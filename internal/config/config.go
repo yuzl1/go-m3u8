@@ -28,7 +28,7 @@ type Config struct {
 // DefaultConfig returns sensible defaults.
 func DefaultConfig() *Config {
 	return &Config{
-		SaveDir:            "./downloads",
+		SaveDir:            "/downloads",
 		TempDir:            "",
 		ThreadCount:        16,
 		AutoSelect:         true,
