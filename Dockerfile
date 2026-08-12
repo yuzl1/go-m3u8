@@ -2,7 +2,6 @@
 FROM golang:alpine AS builder
 WORKDIR /app
 COPY . .
-RUN ls -la /app/internal/config/ && cat /app/go.mod && go env GOMOD
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o go-m3u8 .
 
 # Stage 2: Runtime with N_m3u8DL-RE + ffmpeg

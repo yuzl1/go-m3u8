@@ -2,10 +2,10 @@
 go-m3u8
 
 # Downloads
-downloads/
+/downloads/
 
 # Config (local)
-config/
+/config/
 
 # IDE
 .idea/
