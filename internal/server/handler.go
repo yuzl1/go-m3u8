@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strings"
 
-	"go-m3u8/internal/config"
-	"go-m3u8/internal/download"
+	"github.com/yuzl1/go-m3u8/internal/config"
+	"github.com/yuzl1/go-m3u8/internal/download"
 )
 
 // Handler holds dependencies for HTTP handlers.

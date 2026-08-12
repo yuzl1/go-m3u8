@@ -5,9 +5,9 @@ import (
 	"log"
 	"net/http"
 
-	"go-m3u8/internal/config"
-	"go-m3u8/internal/download"
-	"go-m3u8/internal/ws"
+	"github.com/yuzl1/go-m3u8/internal/config"
+	"github.com/yuzl1/go-m3u8/internal/download"
+	"github.com/yuzl1/go-m3u8/internal/ws"
 )
 
 // Server wraps the HTTP server and its dependencies.

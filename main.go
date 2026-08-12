@@ -5,10 +5,10 @@ import (
 	"log"
 	"os"
 
-	"go-m3u8/internal/config"
-	"go-m3u8/internal/download"
-	"go-m3u8/internal/server"
-	"go-m3u8/internal/ws"
+	"github.com/yuzl1/go-m3u8/internal/config"
+	"github.com/yuzl1/go-m3u8/internal/download"
+	"github.com/yuzl1/go-m3u8/internal/server"
+	"github.com/yuzl1/go-m3u8/internal/ws"
 )
 
 //go:embed web/templates/index.html

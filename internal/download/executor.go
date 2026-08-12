@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"go-m3u8/internal/config"
+	"github.com/yuzl1/go-m3u8/internal/config"
 )
 
 // Task represents a single download job.

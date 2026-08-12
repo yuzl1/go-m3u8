@@ -1,4 +1,4 @@
-module go-m3u8
+module github.com/yuzl1/go-m3u8
 
 go 1.25.0
 

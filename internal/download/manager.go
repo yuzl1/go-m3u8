@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"go-m3u8/internal/config"
+	"github.com/yuzl1/go-m3u8/internal/config"
 )
 
 // StatusChange is broadcast when a task changes state.

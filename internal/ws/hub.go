@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"sync"
 
-	"go-m3u8/internal/download"
+	"github.com/yuzl1/go-m3u8/internal/download"
 
 	"golang.org/x/net/websocket"
 )
