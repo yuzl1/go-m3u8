@@ -193,6 +193,9 @@ func Run(ctx context.Context, cfg *config.Config, task *Task, statusCh chan<- *T
 			task.Status = "done"
 			task.Progress = "Download complete"
 			task.Percent = 100
+			if task.TotalSegments > 0 {
+				task.DoneSegments = task.TotalSegments
+			}
 			task.Error = ""
 			notify(statusCh, task)
 			return nil
@@ -213,11 +216,12 @@ func Run(ctx context.Context, cfg *config.Config, task *Task, statusCh chan<- *T
 }
 
 var (
-	pctRe      = regexp.MustCompile(`(\d+(?:\.\d+)?)\s*%`)
-	segRe      = regexp.MustCompile(`(\d+)\s*/\s*(\d+)`)
-	totalSegRe = regexp.MustCompile(`(?i)(?:total\s+segments?|分片总数|total)[^\d]{0,20}(\d+)`)
-	ansiRe     = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
-	outFileRe  = regexp.MustCompile(`(?i)(?:muxing\s+to|output(?: file)?[^:]*:|muxed\s+to|saving\s+to)\s+(.+)`)
+	pctRe        = regexp.MustCompile(`(\d+(?:\.\d+)?)\s*%`)
+	segRe        = regexp.MustCompile(`(\d+)\s*/\s*(\d+)`)
+	sizeSpeedRe  = regexp.MustCompile(`(\d+(?:\.\d+)?(?:B|KB|MB|GB))\s*/\s*(\d+(?:\.\d+)?(?:B|KB|MB|GB))\s*(\d+(?:\.\d+)?(?:B|KB|MB)ps)`)
+	totalSegRe   = regexp.MustCompile(`(?i)(?:total\s+segments?|分片总数|total)[^\d]{0,20}(\d+)`)
+	ansiRe       = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
+	outFileRe    = regexp.MustCompile(`(?i)(?:muxing\s+to|output(?: file)?[^:]*:|muxed\s+to|saving\s+to)\s+(.+)`)
 	// failureRe matches fatal errors in N_m3u8DL-RE output. It logs
 	// "ERROR: Failed" on segment-count-check failure but still exits 0,
 	// so we must detect failure from the log, not just the exit code.
@@ -344,22 +348,13 @@ func updateTaskProgress(task *Task, line string) {
 		return
 	}
 
-	// Percentage (progress bar redraws, keep max)
-	if m := pctRe.FindStringSubmatch(line); m != nil {
-		if p, err := strconv.ParseFloat(m[1], 64); err == nil && p >= 0 && p <= 100 {
-			if p > task.Percent {
-				task.Percent = p
-			}
-			return
-		}
-	}
-
-	// Segment counts: "56/123" — total must be plausible to avoid false
-	// positives on dates like 2026/08/12.
+	// Segment counts FIRST: progress bar lines contain BOTH "148/195" and
+	// "75.90%", and we need the counts before the percent branch returns.
+	// Total must be plausible to avoid false positives on dates (2026/08/12).
 	if m := segRe.FindStringSubmatch(line); m != nil {
 		done, err1 := strconv.Atoi(m[1])
 		total, err2 := strconv.Atoi(m[2])
-		if err1 == nil && err2 == nil && total >= 10 && done <= total {
+		if err1 == nil && err2 == nil && total >= 10 && total < 100000 && done <= total {
 			task.DoneSegments = done
 			task.TotalSegments = total
 			p := float64(done) / float64(total) * 100
@@ -367,6 +362,25 @@ func updateTaskProgress(task *Task, line string) {
 				task.Percent = p
 			}
 			task.Progress = fmt.Sprintf("%d/%d 分片 (%.1f%%)", done, total, p)
+			// Append size/speed when present: "216.77MB/285.61MB 2.62MBps"
+			if sm := sizeSpeedRe.FindStringSubmatch(line); sm != nil {
+				task.Progress = fmt.Sprintf("%d/%d 分片 (%.1f%%)  %s/%s @%s", done, total, p, sm[1], sm[2], sm[3])
+			}
+			return
+		}
+	}
+
+	// Percentage only (e.g. merge phase progress without segment counts)
+	if m := pctRe.FindStringSubmatch(line); m != nil {
+		if p, err := strconv.ParseFloat(m[1], 64); err == nil && p >= 0 && p <= 100 {
+			if p > task.Percent {
+				task.Percent = p
+			}
+			if task.TotalSegments > 0 {
+				task.Progress = fmt.Sprintf("%d/%d 分片 (%.1f%%)", task.DoneSegments, task.TotalSegments, p)
+			} else {
+				task.Progress = fmt.Sprintf("%.1f%%", p)
+			}
 			return
 		}
 	}
