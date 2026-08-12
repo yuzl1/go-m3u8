@@ -8,7 +8,7 @@ services:
         NM3U8DL_VERSION: "0.6.0-beta"
     container_name: go-m3u8
     ports:
-      - "8080:8080"
+      - "5000:8080"
     volumes:
       - ./downloads:/downloads
       - ./config:/config
