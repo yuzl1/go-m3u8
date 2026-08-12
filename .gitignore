@@ -12,3 +12,7 @@ go-m3u8
 .vscode/
 *.swp
 *.swo
+
+# Screenshots
+*.png
+*.jpg
