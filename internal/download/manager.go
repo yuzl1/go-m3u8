@@ -128,6 +128,26 @@ func (m *Manager) Cancel(id string) error {
 	return nil
 }
 
+// Retry re-submits a failed or cancelled task.
+func (m *Manager) Retry(id string) (*Task, error) {
+	m.mu.Lock()
+	task, ok := m.tasks[id]
+	m.mu.Unlock()
+	if !ok {
+		return nil, fmt.Errorf("task not found: %s", id)
+	}
+	if task.Status != "failed" && task.Status != "cancelled" && task.Status != "done" {
+		return nil, fmt.Errorf("cannot retry task in status %q", task.Status)
+	}
+	// Reset and re-enqueue.
+	task.Status = "pending"
+	task.Error = ""
+	task.Progress = ""
+	m.broadcast <- task
+	go m.enqueue(task)
+	return task, nil
+}
+
 // Delete removes a task from history.
 func (m *Manager) Delete(id string) error {
 	m.mu.Lock()

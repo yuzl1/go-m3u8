@@ -138,6 +138,8 @@ func (h *Handler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 	// Extract ID from /api/tasks/<id>
 	path := strings.TrimPrefix(r.URL.Path, "/api/tasks/")
 	id := strings.TrimSuffix(path, "/")
+	// Strip /retry suffix if present
+	id = strings.TrimSuffix(id, "/retry")
 	if id == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "task id required"})
 		return
@@ -159,6 +161,23 @@ func (h *Handler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "cancelled"})
+}
+
+// RetryTask re-submits a failed/cancelled task.
+func (h *Handler) RetryTask(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/tasks/")
+	id := strings.TrimSuffix(path, "/retry")
+	id = strings.TrimSuffix(id, "/")
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "task id required"})
+		return
+	}
+	task, err := h.Manager.Retry(id)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, task)
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {

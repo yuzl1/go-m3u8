@@ -15,6 +15,7 @@
   --primary-hover: #4338ca;
   --danger: #dc2626;
   --danger-hover: #b91c1c;
+  --retry: #2563eb;
   --success: #16a34a;
   --warning: #f59e0b;
   --radius: 8px;
@@ -31,6 +32,7 @@
     --primary-hover: #6366f1;
     --danger: #ef4444;
     --danger-hover: #dc2626;
+    --retry: #60a5fa;
     --success: #22c55e;
     --warning: #fbbf24;
   }
@@ -45,6 +47,7 @@
   --primary-hover: #6366f1;
   --danger: #ef4444;
   --danger-hover: #dc2626;
+  --retry: #60a5fa;
   --success: #22c55e;
   --warning: #fbbf24;
 }
@@ -57,7 +60,7 @@ body {
   line-height: 1.6;
   padding: 20px;
 }
-.container { max-width: 900px; margin: 0 auto; }
+.container { max-width: 1000px; margin: 0 auto; }
 
 h1 {
   font-size: 24px;
@@ -127,14 +130,9 @@ h2 {
 .btn-primary:hover { background: var(--primary-hover); }
 .btn-danger { background: var(--danger); color: #fff; }
 .btn-danger:hover { background: var(--danger-hover); }
+.btn-retry { background: var(--retry); color: #fff; }
+.btn-retry:hover { background: #1d4ed8; }
 .btn-sm { padding: 4px 12px; font-size: 12px; }
-
-.header-row {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-.header-row input { flex: 1; }
 
 /* Status badges */
 .badge {
@@ -150,6 +148,7 @@ h2 {
 .badge-done { background: #d1fae5; color: #059669; }
 .badge-failed { background: #fee2e2; color: #dc2626; }
 .badge-cancelled { background: #f3f4f6; color: #9ca3af; }
+.badge-retrying { background: #ede9fe; color: #7c3aed; }
 
 /* Task table */
 .task-table { width: 100%; border-collapse: collapse; }
@@ -162,20 +161,22 @@ h2 {
 .task-table th { font-weight: 600; color: var(--text-secondary); }
 .task-table td { vertical-align: middle; }
 .task-table .url-cell {
-  max-width: 240px;
+  max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .task-table .err-cell {
-  max-width: 180px;
+  max-width: 200px;
+  color: var(--danger);
+  font-size: 12px;
+  cursor: pointer;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--danger);
-  font-size: 12px;
 }
-.task-table .actions { display: flex; gap: 6px; }
+.task-table .err-cell:hover { opacity: 0.8; }
+.task-table .actions { display: flex; gap: 6px; flex-wrap: wrap; }
 
 .empty-state {
   text-align: center;
@@ -211,7 +212,6 @@ h2 {
   line-height: 1.5;
   user-select: all;
 }
-
 .cat-catch-note {
   font-size: 12px;
   color: var(--text-secondary);
@@ -222,6 +222,41 @@ h2 {
   padding: 1px 4px;
   border-radius: 3px;
   font-size: 12px;
+}
+
+/* Error modal */
+.err-modal {
+  display: none;
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5);
+  align-items: center; justify-content: center;
+  z-index: 1000;
+}
+.err-modal.show { display: flex; }
+.err-modal-content {
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  padding: 24px;
+  max-width: 640px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  font-family: monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-all;
+  position: relative;
+}
+.err-modal-close {
+  position: sticky; top: 0; float: right;
+  background: var(--text-secondary);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 12px;
+  cursor: pointer;
+  font-size: 14px;
 }
 </style>
 </head>
@@ -338,26 +373,34 @@ h2 {
 <!-- Cat-Catch Config Tab -->
 <div id="tab-catcatch" class="tab-content card">
   <h2>🐱 猫抓 (Cat-Catch) 集成配置</h2>
-  <p style="margin-bottom:12px;color:var(--text-secondary)">在猫抓扩展的 <strong>"调用程序"</strong> 设置中，添加以下配置：</p>
-
-  <h3 style="font-size:15px;margin-bottom:8px">方法一：自定义调用（推荐）</h3>
-  <p style="margin-bottom:4px;color:var(--text-secondary);font-size:13px">猫抓 → 设置 → 调用程序 → 添加，填入：</p>
-  <div class="cat-catch-code" id="catcatch-url">http://localhost:8080/api/download?url=${url}&title=${title}&referer=${referer}</div>
-  <p class="cat-catch-note">
-    变量说明：<code>${url}</code> = m3u8地址, <code>${title}</code> = 页面标题, <code>${referer}</code> = 来源页
+  <p style="margin-bottom:12px;color:var(--text-secondary)">
+    参考官方文档：<a href="https://cat-catch.94cat.com/docs/settings#send" target="_blank" rel="noopener" style="color:var(--primary)">cat-catch.94cat.com/docs/settings#send</a>
   </p>
 
-  <h3 style="font-size:15px;margin:16px 0 8px">方法二：curl POST（脚本调用）</h3>
+  <h3 style="font-size:15px;margin-bottom:8px">配置方法</h3>
+  <p style="margin-bottom:4px;color:var(--text-secondary);font-size:13px">
+    猫抓 → 设置 → 调用程序，新增一个调用程序，填入以下 URL 模板：
+  </p>
+  <div class="cat-catch-code" id="catcatch-url">http://localhost:8080/api/download?url=${url}&title=${title}&referer=${referer}</div>
+  <p class="cat-catch-note">
+    可用变量：<code>${url}</code>（m3u8地址）、<code>${title}</code>（页面标题）、<code>${referer}</code>（来源页）、<code>${cookie}</code>（Cookie）、<code>${userAgent}</code>（UA）
+  </p>
+
+  <h3 style="font-size:15px;margin:20px 0 8px">curl 测试</h3>
+  <div class="cat-catch-code">curl "http://localhost:8080/api/download?url=...&title=test&referer=..."</div>
+
+  <h3 style="font-size:15px;margin:20px 0 8px">POST JSON 方式</h3>
   <div class="cat-catch-code">curl -X POST "http://localhost:8080/api/download" \
   -H "Content-Type: application/json" \
   -d '{"url":"https://example.com/video.m3u8","title":"我的视频","referer":"https://example.com/"}'</div>
 
-  <h3 style="font-size:15px;margin:16px 0 8px">API 端点参考</h3>
+  <h3 style="font-size:15px;margin:20px 0 8px">API 端点参考</h3>
   <table class="task-table">
     <tr><th>方法</th><th>路径</th><th>说明</th></tr>
     <tr><td>GET/POST</td><td>/api/download</td><td>触发下载（querystring 或 JSON body）</td></tr>
     <tr><td>GET</td><td>/api/tasks</td><td>获取所有任务状态</td></tr>
     <tr><td>DELETE</td><td>/api/tasks/{id}</td><td>取消任务；加 <code>?action=delete</code> 删除已完成任务</td></tr>
+    <tr><td>POST</td><td>/api/tasks/{id}/retry</td><td>重试失败任务</td></tr>
     <tr><td>GET</td><td>/api/config</td><td>获取全局配置</td></tr>
     <tr><td>PUT</td><td>/api/config</td><td>更新全局配置</td></tr>
     <tr><td>GET</td><td>/ws</td><td>WebSocket 实时推送</td></tr>
@@ -365,6 +408,14 @@ h2 {
 </div>
 
 </div><!-- /container -->
+
+<!-- Error Modal -->
+<div class="err-modal" id="err-modal">
+  <div class="err-modal-content">
+    <button class="err-modal-close" onclick="closeErrModal()">✕ 关闭</button>
+    <div id="err-modal-body"></div>
+  </div>
+</div>
 
 <script>
 // ---- State ----
@@ -400,7 +451,7 @@ async function loadConfig() {
         }
       }
     }
-    // Update cat-catch URL with current port
+    // Update cat-catch URL
     const port = cfg.port || 8080;
     document.getElementById('catcatch-url').textContent =
       `http://localhost:${port}/api/download?url=$\{url}&title=$\{title}&referer=$\{referer}`;
@@ -415,13 +466,10 @@ configForm.addEventListener('submit', async (e) => {
     if (el.type === 'checkbox') data[el.name] = el.checked;
     else data[el.name] = el.value;
   }
-  // Parse headers
   data.default_headers = {};
   for (const line of headersTextarea.value.split('\n')) {
     const idx = line.indexOf(':');
-    if (idx > 0) {
-      data.default_headers[line.slice(0, idx).trim()] = line.slice(idx+1).trim();
-    }
+    if (idx > 0) data.default_headers[line.slice(0, idx).trim()] = line.slice(idx+1).trim();
   }
   data.thread_count = parseInt(data.thread_count) || 16;
   data.max_concurrent = parseInt(data.max_concurrent) || 3;
@@ -443,11 +491,23 @@ document.getElementById('quick-form').addEventListener('submit', async (e) => {
     const task = await res.json();
     if (res.ok) {
       e.target.reset();
-      document.querySelectorAll('.tab-btn')[0].click(); // switch to tasks tab
+      document.querySelectorAll('.tab-btn')[0].click();
     } else {
       alert('错误: ' + (task.error || 'unknown'));
     }
   } catch(err) { alert('请求失败: ' + err.message); }
+});
+
+// ---- Error Modal ----
+function showErrModal(text) {
+  document.getElementById('err-modal-body').textContent = text;
+  document.getElementById('err-modal').classList.add('show');
+}
+function closeErrModal() {
+  document.getElementById('err-modal').classList.remove('show');
+}
+document.getElementById('err-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeErrModal();
 });
 
 // ---- Task List Rendering ----
@@ -458,26 +518,32 @@ function renderTasks() {
     return;
   }
 
-  const rows = tasks.map(t => `
-    <tr>
+  const rows = tasks.map(t => {
+    const errDisplay = t.error
+      ? `<span class="err-cell" onclick="showErrModal(${JSON.stringify(t.error).replace(/"/g, '&quot;')})" title="点击查看完整错误">${esc(t.error.substring(0, 80))}${t.error.length > 80 ? '...' : ''}</span>`
+      : '-';
+    const retryBtn = t.status === 'failed'
+      ? `<button class="btn btn-retry btn-sm" onclick="retryTask('${t.id}')">重试</button>`
+      : '';
+    return `<tr>
       <td class="url-cell" title="${esc(t.url)}">${esc(t.url)}</td>
       <td>${esc(t.title || '-')}</td>
       <td><span class="badge badge-${t.status}">${statusText(t.status)}</span></td>
       <td>${esc(t.progress || '-')}</td>
-      <td class="err-cell" title="${esc(t.error||'')}">${esc(t.error || '')}</td>
+      <td>${errDisplay}</td>
       <td>${formatTime(t.created_at)}</td>
       <td class="actions">
         ${(t.status === 'pending' || t.status === 'downloading')
           ? `<button class="btn btn-danger btn-sm" onclick="cancelTask('${t.id}')">取消</button>`
           : (t.status === 'done' || t.status === 'failed' || t.status === 'cancelled')
-            ? `<button class="btn btn-sm" onclick="deleteTask('${t.id}')" style="background:var(--text-secondary);color:#fff">删除</button>`
+            ? `<button class="btn btn-sm" onclick="deleteTask('${t.id}')" style="background:var(--text-secondary);color:#fff">删除</button>` + retryBtn
             : ''}
       </td>
-    </tr>
-  `).reverse().join('');
+    </tr>`;
+  }).reverse().join('');
 
   el.innerHTML = `<table class="task-table">
-    <thead><tr><th>URL</th><th>标题</th><th>状态</th><th>进度</th><th>错误</th><th>时间</th><th>操作</th></tr></thead>
+    <thead><tr><th>URL</th><th>标题</th><th>状态</th><th>进度</th><th>错误信息</th><th>时间</th><th>操作</th></tr></thead>
     <tbody>${rows}</tbody></table>`;
 }
 
@@ -488,6 +554,9 @@ function statusText(s) {
 
 async function cancelTask(id) { await fetch('/api/tasks/' + id, {method:'DELETE'}); }
 async function deleteTask(id) { await fetch('/api/tasks/' + id + '?action=delete', {method:'DELETE'}); }
+async function retryTask(id) {
+  await fetch('/api/tasks/' + id + '/retry', {method:'POST'});
+}
 
 function esc(s) {
   if (!s) return '';
@@ -521,9 +590,7 @@ function connectWS() {
     } catch(e) { console.error('ws parse', e); }
   };
 
-  ws.onclose = () => {
-    setTimeout(connectWS, 3000);
-  };
+  ws.onclose = () => { setTimeout(connectWS, 3000); };
 }
 
 // ---- Init ----

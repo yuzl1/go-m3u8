@@ -91,19 +91,37 @@ func BuildCommand(cfg *config.Config, task *Task) (string, []string) {
 	return cfg.Nm3u8dlPath, args
 }
 
+// maxRetries is the number of download retries on failure.
+const maxRetries = 3
+
 // Run starts N_m3u8DL-RE and blocks until completion.
 // It sends status updates to the provided channel.
+// Retries up to maxRetries times on failure.
 func Run(ctx context.Context, cfg *config.Config, task *Task, statusCh chan<- *Task) error {
 	exe, args := BuildCommand(cfg, task)
 
-	task.Status = "downloading"
-	task.Progress = "Starting N_m3u8DL-RE..."
-	notify(statusCh, task)
+	var lastErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		if attempt > 1 {
+			task.Progress = fmt.Sprintf("Retrying (attempt %d/%d)...", attempt, maxRetries)
+			notify(statusCh, task)
+		} else {
+			task.Status = "downloading"
+			task.Progress = "Starting N_m3u8DL-RE..."
+			notify(statusCh, task)
+		}
 
-	cmd := exec.CommandContext(ctx, exe, args...)
-	output, err := cmd.CombinedOutput()
+		cmd := exec.CommandContext(ctx, exe, args...)
+		output, err := cmd.CombinedOutput()
 
-	if err != nil {
+		if err == nil {
+			task.Status = "done"
+			task.Progress = "Download complete"
+			task.Error = ""
+			notify(statusCh, task)
+			return nil
+		}
+
 		// Check if cancelled
 		if ctx.Err() != nil {
 			task.Status = "cancelled"
@@ -111,17 +129,18 @@ func Run(ctx context.Context, cfg *config.Config, task *Task, statusCh chan<- *T
 			notify(statusCh, task)
 			return ctx.Err()
 		}
-		task.Status = "failed"
-		task.Error = fmt.Sprintf("%s\n%s", err.Error(), string(output))
-		task.Progress = ""
-		notify(statusCh, task)
-		return fmt.Errorf("N_m3u8DL-RE failed: %w\nOutput: %s", err, string(output))
+
+		lastErr = fmt.Errorf("%s\n%s", err.Error(), string(output))
+		if attempt < maxRetries {
+			continue
+		}
 	}
 
-	task.Status = "done"
-	task.Progress = "Download complete"
+	task.Status = "failed"
+	task.Error = lastErr.Error()
+	task.Progress = ""
 	notify(statusCh, task)
-	return nil
+	return fmt.Errorf("N_m3u8DL-RE failed after %d attempts: %w", maxRetries, lastErr)
 }
 
 func notify(ch chan<- *Task, task *Task) {

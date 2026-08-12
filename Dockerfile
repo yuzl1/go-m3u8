@@ -15,16 +15,28 @@ RUN apt-get update && \
         xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Download N_m3u8DL-RE via GitHub API (auto-resolves latest release + correct filename)
-RUN curl -sL "https://api.github.com/repos/nilaoda/N_m3u8DL-RE/releases/latest" \
-        -o /tmp/release.json \
-    && DOWNLOAD_URL=$(grep -o '"browser_download_url": *"[^"]*linux-x64[^"]*"' /tmp/release.json | head -1 | sed 's/.*"\(https:.*\)"/\1/') \
-    && echo "Downloading: $DOWNLOAD_URL" \
-    && curl -sL "$DOWNLOAD_URL" -o /tmp/nm3u8dl.tar.gz \
-    && mkdir -p /opt/nm3u8dl \
-    && tar -xzf /tmp/nm3u8dl.tar.gz -C /opt/nm3u8dl \
-    && chmod +x /opt/nm3u8dl/N_m3u8DL-RE \
-    && rm /tmp/nm3u8dl.tar.gz /tmp/release.json
+# Download N_m3u8DL-RE via GitHub API with arch auto-detection
+RUN set -e; \
+    ARCH=$(uname -m); \
+    case "$ARCH" in \
+        x86_64)  ASSET_ARCH="x64" ;; \
+        aarch64) ASSET_ARCH="arm64" ;; \
+        *)       ASSET_ARCH="x64" ;; \
+    esac; \
+    curl -sL "https://api.github.com/repos/nilaoda/N_m3u8DL-RE/releases/latest" \
+        -o /tmp/release.json; \
+    DOWNLOAD_URL=$(grep -o '"browser_download_url": *"[^"]*linux-'${ASSET_ARCH}'[^"]*"' /tmp/release.json | head -1 | sed 's/.*"\(https:.*\)"/\1/'); \
+    if [ -z "$DOWNLOAD_URL" ]; then \
+        echo "WARNING: no linux-${ASSET_ARCH} build, trying linux-x64"; \
+        DOWNLOAD_URL=$(grep -o '"browser_download_url": *"[^"]*linux-x64[^"]*"' /tmp/release.json | head -1 | sed 's/.*"\(https:.*\)"/\1/'); \
+    fi; \
+    echo "Arch: $ARCH -> asset arch: $ASSET_ARCH"; \
+    echo "Downloading: $DOWNLOAD_URL"; \
+    curl -sL "$DOWNLOAD_URL" -o /tmp/nm3u8dl.tar.gz; \
+    mkdir -p /opt/nm3u8dl; \
+    tar -xzf /tmp/nm3u8dl.tar.gz -C /opt/nm3u8dl; \
+    chmod +x /opt/nm3u8dl/N_m3u8DL-RE; \
+    rm /tmp/nm3u8dl.tar.gz /tmp/release.json
 
 ENV PATH="/opt/nm3u8dl:${PATH}"
 
