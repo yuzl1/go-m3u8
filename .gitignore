@@ -1,0 +1,14 @@
+# Binary
+go-m3u8
+
+# Downloads
+downloads/
+
+# Config (local)
+config/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
