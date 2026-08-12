@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -152,15 +153,17 @@ func Run(ctx context.Context, cfg *config.Config, task *Task, statusCh chan<- *T
 			task.Log += fmt.Sprintf("\n== Retry attempt %d/%d ==\n", attempt, maxRetries)
 			task.Progress = fmt.Sprintf("Retrying (attempt %d/%d)...", attempt, maxRetries)
 			task.Percent = 0
+			task.DoneSegments = 0
 			notify(statusCh, task)
 		} else {
 			task.Status = "downloading"
 			task.Progress = "Starting N_m3u8DL-RE..."
 			task.Percent = 0
+			task.DoneSegments = 0
 			notify(statusCh, task)
 		}
 
-		cmd := exec.CommandContext(ctx, exe, args...)
+		cmd := buildExec(ctx, exe, args)
 		err := runStreaming(cmd, task, statusCh)
 
 		// Check if cancelled
@@ -232,6 +235,29 @@ var (
 // error even though the process exited 0.
 func checkLogForFailure(log string) bool {
 	return failureRe.MatchString(log)
+}
+
+// buildExec constructs the command to run N_m3u8DL-RE. On Linux it wraps
+// the process in a pseudo-TTY via `script` so the progress display flushes
+// in real time — N_m3u8DL-RE buffers stdout heavily when it is a plain
+// pipe, which made progress appear only at the end of the run.
+func buildExec(ctx context.Context, exe string, args []string) *exec.Cmd {
+	if runtime.GOOS == "linux" {
+		if scriptPath, err := exec.LookPath("script"); err == nil {
+			cmdStr := quoteArgs(exe, args)
+			return exec.CommandContext(ctx, scriptPath, "-qec", cmdStr, "/dev/null")
+		}
+	}
+	return exec.CommandContext(ctx, exe, args...)
+}
+
+// quoteArgs joins a command and its args into a single-quoted shell string.
+func quoteArgs(exe string, args []string) string {
+	parts := append([]string{exe}, args...)
+	for i, p := range parts {
+		parts[i] = "'" + strings.ReplaceAll(p, "'", `'\''`) + "'"
+	}
+	return strings.Join(parts, " ")
 }
 
 // splitAnyLine splits on \n or \r — N_m3u8DL-RE redraws its progress bar

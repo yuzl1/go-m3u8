@@ -13,6 +13,7 @@ RUN apt-get update && \
         curl \
         ca-certificates \
         xz-utils \
+        bsdutils \
     && rm -rf /var/lib/apt/lists/*
 
 # Download N_m3u8DL-RE via GitHub API with arch auto-detection
