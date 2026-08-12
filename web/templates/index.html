@@ -525,11 +525,22 @@ function renderTasks() {
     const retryBtn = t.status === 'failed'
       ? `<button class="btn btn-retry btn-sm" onclick="retryTask('${t.id}')">重试</button>`
       : '';
+    const pct = t.percent || 0;
+    const barColor = t.status === 'done' ? 'var(--success)' : t.status === 'failed' ? 'var(--danger)' : 'var(--primary)';
+    const progressCell = (t.status === 'pending' || t.status === 'downloading' || t.status === 'merging' || t.status === 'done')
+      ? `<div style="display:flex;align-items:center;gap:8px;min-width:120px">
+          <div style="flex:1;height:8px;background:var(--bg);border-radius:4px;overflow:hidden">
+            <div style="height:100%;width:${Math.min(pct,100)}%;background:${barColor};border-radius:4px;transition:width 0.3s"></div>
+          </div>
+          <span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;min-width:44px">${pct > 0 ? pct.toFixed(1) + '%' : ''}</span>
+        </div>
+        <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">${esc(t.progress || '')}</div>`
+      : esc(t.progress || '-');
     return `<tr>
       <td class="url-cell" title="${esc(t.url)}">${esc(t.url)}</td>
       <td>${esc(t.title || '-')}</td>
       <td><span class="badge badge-${t.status}">${statusText(t.status)}</span></td>
-      <td>${esc(t.progress || '-')}</td>
+      <td>${progressCell}</td>
       <td>${errDisplay}</td>
       <td>${formatTime(t.created_at)}</td>
       <td class="actions">
