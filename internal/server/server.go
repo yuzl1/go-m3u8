@@ -68,6 +68,8 @@ func New(cfgStore *config.Store, manager *download.Manager, wsHandler *ws.Handle
 			h.DeleteTask(w, r)
 		case http.MethodPost:
 			h.RetryTask(w, r)
+		case http.MethodGet:
+			h.GetTaskLog(w, r)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}

@@ -517,6 +517,17 @@ document.getElementById('err-modal').addEventListener('click', function(e) {
   if (e.target === this) closeErrModal();
 });
 
+// ---- Task Log ----
+async function showTaskLog(id) {
+  try {
+    const res = await fetch('/api/tasks/' + id + '/log');
+    const data = await res.json();
+    showErrModal(data.log || '(no log captured)');
+  } catch(e) {
+    showErrModal('Failed to load log: ' + e.message);
+  }
+}
+
 // ---- Task List Rendering ----
 function renderTasks() {
   const el = document.getElementById('task-list');
@@ -534,6 +545,9 @@ function renderTasks() {
       : '';
     const pct = t.percent || 0;
     const barColor = t.status === 'done' ? 'var(--success)' : t.status === 'failed' ? 'var(--danger)' : 'var(--primary)';
+    const segInfo = (t.total_segments > 0)
+      ? `<div style="font-size:11px;color:var(--text);margin-top:2px">分片: ${t.done_segments || 0}/${t.total_segments}</div>`
+      : '';
     const progressCell = (t.status === 'pending' || t.status === 'downloading' || t.status === 'merging' || t.status === 'done')
       ? `<div style="display:flex;align-items:center;gap:8px;min-width:120px">
           <div style="flex:1;height:8px;background:var(--bg);border-radius:4px;overflow:hidden">
@@ -541,6 +555,7 @@ function renderTasks() {
           </div>
           <span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;min-width:44px">${pct > 0 ? pct.toFixed(1) + '%' : ''}</span>
         </div>
+        ${segInfo}
         <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">${esc(t.progress || '')}</div>
         ${t.output_file ? `<div style="font-size:11px;color:var(--success);margin-top:2px;word-break:break-all">📁 ${esc(t.output_file)}</div>` : ''}`
       : esc(t.progress || '-');
@@ -552,6 +567,7 @@ function renderTasks() {
       <td>${errDisplay}</td>
       <td>${formatTime(t.created_at)}</td>
       <td class="actions">
+        <button class="btn btn-sm" onclick="showTaskLog('${t.id}')" style="background:var(--bg);color:var(--text);border:1px solid var(--border)">日志</button>
         ${(t.status === 'pending' || t.status === 'downloading')
           ? `<button class="btn btn-danger btn-sm" onclick="cancelTask('${t.id}')">取消</button>`
           : (t.status === 'done' || t.status === 'failed' || t.status === 'cancelled')

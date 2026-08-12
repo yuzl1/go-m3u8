@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -19,18 +20,21 @@ import (
 
 // Task represents a single download job.
 type Task struct {
-	ID         string            `json:"id"`
-	URL        string            `json:"url"`
-	Title      string            `json:"title"`
-	Status     string            `json:"status"` // pending, downloading, merging, done, failed, cancelled
-	Progress   string            `json:"progress"`
-	Percent    float64           `json:"percent"`
-	OutputFile string            `json:"output_file,omitempty"`
-	Error      string            `json:"error,omitempty"`
-	CreatedAt  time.Time         `json:"created_at"`
-	Headers    map[string]string `json:"headers,omitempty"`
-	BaseURL    string            `json:"base_url,omitempty"`
-	SaveDir    string            `json:"save_dir,omitempty"`
+	ID            string            `json:"id"`
+	URL           string            `json:"url"`
+	Title         string            `json:"title"`
+	Status        string            `json:"status"` // pending, downloading, merging, done, failed, cancelled
+	Progress      string            `json:"progress"`
+	Percent       float64           `json:"percent"`
+	TotalSegments int               `json:"total_segments,omitempty"`
+	DoneSegments  int               `json:"done_segments,omitempty"`
+	OutputFile    string            `json:"output_file,omitempty"`
+	Error         string            `json:"error,omitempty"`
+	CreatedAt     time.Time         `json:"created_at"`
+	Headers       map[string]string `json:"headers,omitempty"`
+	BaseURL       string            `json:"base_url,omitempty"`
+	SaveDir       string            `json:"save_dir,omitempty"`
+	Log           string            `json:"-"` // full process output, not sent over websocket
 }
 
 // BuildCommand builds the N_m3u8DL-RE command-line for a task.
@@ -42,16 +46,7 @@ func BuildCommand(cfg *config.Config, task *Task) (string, []string) {
 
 	// Save directory — always pass an absolute path so N_m3u8DL-RE
 	// cannot misinterpret a relative path (e.g. against its own exe dir).
-	saveDir := cfg.SaveDir
-	if task.SaveDir != "" {
-		saveDir = task.SaveDir
-	}
-	if saveDir != "" {
-		if !filepath.IsAbs(saveDir) {
-			if abs, err := filepath.Abs(saveDir); err == nil {
-				saveDir = abs
-			}
-		}
+	if saveDir := resolveSaveDir(cfg, task); saveDir != "" {
 		args = append(args, "--save-dir", saveDir)
 	}
 
@@ -111,18 +106,40 @@ func BuildCommand(cfg *config.Config, task *Task) (string, []string) {
 	return cfg.Nm3u8dlPath, args
 }
 
+// resolveSaveDir returns the absolute save directory for a task.
+func resolveSaveDir(cfg *config.Config, task *Task) string {
+	dir := cfg.SaveDir
+	if task.SaveDir != "" {
+		dir = task.SaveDir
+	}
+	if dir != "" && !filepath.IsAbs(dir) {
+		if abs, err := filepath.Abs(dir); err == nil {
+			dir = abs
+		}
+	}
+	return dir
+}
+
 // maxRetries is the number of download retries on failure.
 const maxRetries = 3
 
+// maxLogBytes caps how much process output we keep per task.
+const maxLogBytes = 64 * 1024
+
 // Run starts N_m3u8DL-RE and blocks until completion.
 // It streams stdout/stderr, parses progress and sends status updates.
-// Retries up to maxRetries times on failure.
+// Retries up to maxRetries times on failure. After a successful exit it
+// verifies an output file actually appeared in the save directory.
 func Run(ctx context.Context, cfg *config.Config, task *Task, statusCh chan<- *Task) error {
 	exe, args := BuildCommand(cfg, task)
+	saveDir := resolveSaveDir(cfg, task)
+
+	task.Log = "== Command ==\n" + exe + " " + strings.Join(args, " ") + "\n\n"
 
 	var lastErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		if attempt > 1 {
+			task.Log += fmt.Sprintf("\n== Retry attempt %d/%d ==\n", attempt, maxRetries)
 			task.Progress = fmt.Sprintf("Retrying (attempt %d/%d)...", attempt, maxRetries)
 			task.Percent = 0
 			notify(statusCh, task)
@@ -137,6 +154,19 @@ func Run(ctx context.Context, cfg *config.Config, task *Task, statusCh chan<- *T
 		err := runStreaming(cmd, task, statusCh)
 
 		if err == nil {
+			// Exit code 0 — but verify the file actually exists.
+			if task.OutputFile == "" {
+				task.OutputFile = findNewestFile(saveDir, task.CreatedAt)
+			}
+			if task.OutputFile == "" && saveDir != "" {
+				task.Status = "failed"
+				task.Error = fmt.Sprintf(
+					"N_m3u8DL-RE exited successfully but no output file was found in %s.\n\nFull log:\n%s",
+					saveDir, tailLog(task.Log, 4000))
+				task.Progress = ""
+				notify(statusCh, task)
+				return fmt.Errorf("no output file found in %s", saveDir)
+			}
 			task.Status = "done"
 			task.Progress = "Download complete"
 			task.Percent = 100
@@ -168,15 +198,30 @@ func Run(ctx context.Context, cfg *config.Config, task *Task, statusCh chan<- *T
 }
 
 var (
-	pctRe     = regexp.MustCompile(`(\d+(?:\.\d+)?)\s*%`)
-	segRe     = regexp.MustCompile(`(\d+)\s*/\s*(\d+)`)
-	ansiRe    = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
-	outFileRe = regexp.MustCompile(`(?i)(?:muxing to|output(?: file)?[^:]*:|muxed to)\s+(.+)`)
+	pctRe      = regexp.MustCompile(`(\d+(?:\.\d+)?)\s*%`)
+	segRe      = regexp.MustCompile(`(\d+)\s*/\s*(\d+)`)
+	totalSegRe = regexp.MustCompile(`(?i)(?:total\s+segments?|分片总数|total)[^\d]{0,20}(\d+)`)
+	ansiRe     = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
+	outFileRe  = regexp.MustCompile(`(?i)(?:muxing\s+to|output(?: file)?[^:]*:|muxed\s+to|saving\s+to)\s+(.+)`)
 )
 
-// runStreaming starts cmd, streams its output line by line, and parses
-// progress info (percent or segment counts) into task. Returns the
-// command's error, including captured output.
+// splitAnyLine splits on \n or \r — N_m3u8DL-RE redraws its progress bar
+// with \r, so plain \n scanning would swallow all progress updates into
+// one giant "line".
+func splitAnyLine(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	for i := range data {
+		if data[i] == '\n' || data[i] == '\r' {
+			return i + 1, data[:i], nil
+		}
+	}
+	if atEOF && len(data) > 0 {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
+}
+
+// runStreaming starts cmd, streams its output and parses progress info
+// into task. Returns the command's error, including captured output.
 func runStreaming(cmd *exec.Cmd, task *Task, statusCh chan<- *Task) error {
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -191,7 +236,6 @@ func runStreaming(cmd *exec.Cmd, task *Task, statusCh chan<- *Task) error {
 	}
 
 	var mu sync.Mutex
-	var output strings.Builder
 
 	lines := make(chan string, 256)
 	var wg sync.WaitGroup
@@ -199,19 +243,18 @@ func runStreaming(cmd *exec.Cmd, task *Task, statusCh chan<- *Task) error {
 	readPipe := func(r io.Reader) {
 		defer wg.Done()
 		scanner := bufio.NewScanner(r)
+		scanner.Split(splitAnyLine)
 		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 		for scanner.Scan() {
 			select {
 			case lines <- scanner.Text():
 			case <-time.After(time.Second):
-				// avoid blocking forever if reader is stuck
+				// avoid blocking forever if consumer is stuck
 			}
 		}
 		if err := scanner.Err(); err != nil {
 			mu.Lock()
-			output.WriteString("read error: ")
-			output.WriteString(err.Error())
-			output.WriteString("\n")
+			appendLog(task, "read error: "+err.Error())
 			mu.Unlock()
 		}
 	}
@@ -233,8 +276,7 @@ func runStreaming(cmd *exec.Cmd, task *Task, statusCh chan<- *Task) error {
 		}
 
 		mu.Lock()
-		output.WriteString(line)
-		output.WriteString("\n")
+		appendLog(task, line)
 		mu.Unlock()
 
 		updateTaskProgress(task, line)
@@ -251,10 +293,7 @@ func runStreaming(cmd *exec.Cmd, task *Task, statusCh chan<- *Task) error {
 	notify(statusCh, task) // final update with last known state
 
 	if err != nil {
-		mu.Lock()
-		full := output.String()
-		mu.Unlock()
-		return fmt.Errorf("%s\n%s", err.Error(), full)
+		return fmt.Errorf("%s\n%s", err.Error(), tailLog(task.Log, 4000))
 	}
 	return nil
 }
@@ -280,52 +319,88 @@ func updateTaskProgress(task *Task, line string) {
 		return
 	}
 
-	// Percentage
+	// Percentage (progress bar redraws, keep max)
 	if m := pctRe.FindStringSubmatch(line); m != nil {
-		if p, err := strconv.ParseFloat(m[1], 64); err == nil {
-			if p > task.Percent { // keep the max seen
+		if p, err := strconv.ParseFloat(m[1], 64); err == nil && p >= 0 && p <= 100 {
+			if p > task.Percent {
 				task.Percent = p
-				task.Progress = fmt.Sprintf("%.1f%%", p)
 			}
 			return
 		}
 	}
 
-	// Segment counts: "123/456"
+	// Segment counts: "56/123" — total must be plausible to avoid false
+	// positives on dates like 2026/08/12.
 	if m := segRe.FindStringSubmatch(line); m != nil {
 		done, err1 := strconv.Atoi(m[1])
 		total, err2 := strconv.Atoi(m[2])
-		if err1 == nil && err2 == nil && total > 0 {
+		if err1 == nil && err2 == nil && total >= 10 && done <= total {
+			task.DoneSegments = done
+			task.TotalSegments = total
 			p := float64(done) / float64(total) * 100
 			if p > task.Percent {
 				task.Percent = p
-				task.Progress = fmt.Sprintf("%d/%d (%.1f%%)", done, total, p)
 			}
+			task.Progress = fmt.Sprintf("%d/%d 分片 (%.1f%%)", done, total, p)
 			return
 		}
 	}
 
-	// Speed info lines are useful as progress text even without percent
-	if strings.Contains(lower, "speed") || strings.Contains(lower, "download") {
-		if task.Percent > 0 {
-			task.Progress = fmt.Sprintf("%.1f%% - %s", task.Percent, shortLine(line))
+	// Total segments declaration, e.g. "Total segments: 123"
+	if m := totalSegRe.FindStringSubmatch(line); m != nil {
+		if n, err := strconv.Atoi(m[1]); err == nil && n > task.TotalSegments {
+			task.TotalSegments = n
 		}
 	}
 }
 
-// shortLine truncates a line to a reasonable display length.
-func shortLine(s string) string {
-	s = strings.TrimSpace(s)
-	// Strip leading timestamp like "16:21:59.139 INFO : "
-	if idx := strings.Index(s, "INFO"); idx >= 0 && idx < 20 {
-		s = strings.TrimSpace(s[idx+4:])
-		s = strings.TrimPrefix(s, ":")
-		s = strings.TrimSpace(s)
+// appendLog appends to task.Log, keeping only the tail under maxLogBytes.
+func appendLog(task *Task, line string) {
+	if len(task.Log)+len(line)+1 > maxLogBytes {
+		overflow := len(task.Log) + len(line) + 1 - maxLogBytes
+		if overflow < len(task.Log) {
+			task.Log = task.Log[overflow:]
+		} else {
+			task.Log = ""
+		}
 	}
-	if len(s) > 60 {
-		s = s[:60] + "..."
+	task.Log += line + "\n"
+}
+
+func tailLog(s string, n int) string {
+	if len(s) <= n {
+		return s
 	}
-	return s
+	return "...(truncated)...\n" + s[len(s)-n:]
+}
+
+// findNewestFile returns the newest non-directory file in dir modified
+// around the task's lifetime. Returns "" if none found.
+func findNewestFile(dir string, since time.Time) string {
+	if dir == "" {
+		return ""
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	threshold := since.Add(-10 * time.Minute)
+	var best string
+	var bestTime time.Time
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if info.ModTime().After(threshold) && info.ModTime().After(bestTime) {
+			best = filepath.Join(dir, e.Name())
+			bestTime = info.ModTime()
+		}
+	}
+	return best
 }
 
 func notify(ch chan<- *Task, task *Task) {

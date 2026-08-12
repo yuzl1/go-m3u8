@@ -136,13 +136,18 @@ func (h *Handler) ListTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.Manager.List())
 }
 
-// DeleteTask cancels or deletes a task.
-func (h *Handler) DeleteTask(w http.ResponseWriter, r *http.Request) {
-	// Extract ID from /api/tasks/<id>
+// extractTaskID pulls the task ID from /api/tasks/<id>[/retry|/log].
+func extractTaskID(r *http.Request) string {
 	path := strings.TrimPrefix(r.URL.Path, "/api/tasks/")
 	id := strings.TrimSuffix(path, "/")
-	// Strip /retry suffix if present
 	id = strings.TrimSuffix(id, "/retry")
+	id = strings.TrimSuffix(id, "/log")
+	return strings.TrimSuffix(id, "/")
+}
+
+// DeleteTask cancels or deletes a task.
+func (h *Handler) DeleteTask(w http.ResponseWriter, r *http.Request) {
+	id := extractTaskID(r)
 	if id == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "task id required"})
 		return
@@ -168,9 +173,7 @@ func (h *Handler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 
 // RetryTask re-submits a failed/cancelled task.
 func (h *Handler) RetryTask(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/api/tasks/")
-	id := strings.TrimSuffix(path, "/retry")
-	id = strings.TrimSuffix(id, "/")
+	id := extractTaskID(r)
 	if id == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "task id required"})
 		return
@@ -181,6 +184,24 @@ func (h *Handler) RetryTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, task)
+}
+
+// GetTaskLog returns the full N_m3u8DL-RE output for a task.
+func (h *Handler) GetTaskLog(w http.ResponseWriter, r *http.Request) {
+	id := extractTaskID(r)
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "task id required"})
+		return
+	}
+	task := h.Manager.Get(id)
+	if task == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":  id,
+		"log": task.Log,
+	})
 }
 
 // ListFiles lists files in the configured save directory.
