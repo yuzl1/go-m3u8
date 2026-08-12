@@ -43,6 +43,8 @@ ENV PATH="/opt/nm3u8dl:${PATH}"
 COPY --from=builder /app/go-m3u8 /usr/local/bin/go-m3u8
 
 RUN mkdir -p /downloads /config
+# Seed default config so downloads land in the mounted /downloads volume
+RUN echo '{"save_dir":"/downloads","tmp_dir":"","thread_count":16,"auto_select":true,"del_after_done":true,"concurrent":true,"max_concurrent":3,"default_headers":{},"base_url":"","nm3u8dl_path":"N_m3u8DL-RE","port":8080}' > /config/config.json
 VOLUME ["/downloads", "/config"]
 ENV CONFIG_DIR=/config
 

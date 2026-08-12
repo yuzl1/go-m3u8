@@ -7,6 +7,7 @@ import (
 	"io"
 	"maps"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -18,17 +19,18 @@ import (
 
 // Task represents a single download job.
 type Task struct {
-	ID        string            `json:"id"`
-	URL       string            `json:"url"`
-	Title     string            `json:"title"`
-	Status    string            `json:"status"` // pending, downloading, merging, done, failed, cancelled
-	Progress  string            `json:"progress"`
-	Percent   float64           `json:"percent"`
-	Error     string            `json:"error,omitempty"`
-	CreatedAt time.Time         `json:"created_at"`
-	Headers   map[string]string `json:"headers,omitempty"`
-	BaseURL   string            `json:"base_url,omitempty"`
-	SaveDir   string            `json:"save_dir,omitempty"`
+	ID         string            `json:"id"`
+	URL        string            `json:"url"`
+	Title      string            `json:"title"`
+	Status     string            `json:"status"` // pending, downloading, merging, done, failed, cancelled
+	Progress   string            `json:"progress"`
+	Percent    float64           `json:"percent"`
+	OutputFile string            `json:"output_file,omitempty"`
+	Error      string            `json:"error,omitempty"`
+	CreatedAt  time.Time         `json:"created_at"`
+	Headers    map[string]string `json:"headers,omitempty"`
+	BaseURL    string            `json:"base_url,omitempty"`
+	SaveDir    string            `json:"save_dir,omitempty"`
 }
 
 // BuildCommand builds the N_m3u8DL-RE command-line for a task.
@@ -38,12 +40,18 @@ func BuildCommand(cfg *config.Config, task *Task) (string, []string) {
 	// Input URL
 	args = append(args, task.URL)
 
-	// Save directory
+	// Save directory — always pass an absolute path so N_m3u8DL-RE
+	// cannot misinterpret a relative path (e.g. against its own exe dir).
 	saveDir := cfg.SaveDir
 	if task.SaveDir != "" {
 		saveDir = task.SaveDir
 	}
 	if saveDir != "" {
+		if !filepath.IsAbs(saveDir) {
+			if abs, err := filepath.Abs(saveDir); err == nil {
+				saveDir = abs
+			}
+		}
 		args = append(args, "--save-dir", saveDir)
 	}
 
@@ -54,7 +62,13 @@ func BuildCommand(cfg *config.Config, task *Task) (string, []string) {
 
 	// Temp directory
 	if cfg.TempDir != "" {
-		args = append(args, "--tmp-dir", cfg.TempDir)
+		tmpDir := cfg.TempDir
+		if !filepath.IsAbs(tmpDir) {
+			if abs, err := filepath.Abs(tmpDir); err == nil {
+				tmpDir = abs
+			}
+		}
+		args = append(args, "--tmp-dir", tmpDir)
 	}
 
 	// Thread count
@@ -154,9 +168,10 @@ func Run(ctx context.Context, cfg *config.Config, task *Task, statusCh chan<- *T
 }
 
 var (
-	pctRe   = regexp.MustCompile(`(\d+(?:\.\d+)?)\s*%`)
-	segRe   = regexp.MustCompile(`(\d+)\s*/\s*(\d+)`)
-	ansiRe  = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
+	pctRe     = regexp.MustCompile(`(\d+(?:\.\d+)?)\s*%`)
+	segRe     = regexp.MustCompile(`(\d+)\s*/\s*(\d+)`)
+	ansiRe    = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
+	outFileRe = regexp.MustCompile(`(?i)(?:muxing to|output(?: file)?[^:]*:|muxed to)\s+(.+)`)
 )
 
 // runStreaming starts cmd, streams its output line by line, and parses
@@ -248,6 +263,14 @@ func runStreaming(cmd *exec.Cmd, task *Task, statusCh chan<- *Task) error {
 // status/progress fields.
 func updateTaskProgress(task *Task, line string) {
 	lower := strings.ToLower(line)
+
+	// Capture final output file path, e.g. "Muxing to /downloads/xxx.mp4"
+	if m := outFileRe.FindStringSubmatch(line); m != nil {
+		p := strings.TrimSpace(m[1])
+		if p != "" {
+			task.OutputFile = p
+		}
+	}
 
 	// Detect merge phase
 	if strings.Contains(lower, "muxing") || strings.Contains(lower, "merge") ||

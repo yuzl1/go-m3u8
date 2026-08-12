@@ -73,6 +73,14 @@ func New(cfgStore *config.Store, manager *download.Manager, wsHandler *ws.Handle
 		}
 	})
 
+	mux.HandleFunc("/api/files", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		h.ListFiles(w, r)
+	})
+
 	// WebSocket
 	mux.Handle("/ws", wsHandler)
 

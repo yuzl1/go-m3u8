@@ -278,6 +278,13 @@ h2 {
 <div id="tab-downloads" class="tab-content active card">
   <h2>下载任务</h2>
   <div id="task-list"></div>
+  <div style="margin-top:16px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <h3 style="font-size:15px">📁 已下载文件</h3>
+      <button class="btn btn-sm" onclick="refreshFiles()" style="background:var(--primary);color:#fff">刷新</button>
+    </div>
+    <div id="file-list" style="font-size:13px;color:var(--text-secondary)">加载中...</div>
+  </div>
 </div>
 
 <!-- Config Tab -->
@@ -534,7 +541,8 @@ function renderTasks() {
           </div>
           <span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;min-width:44px">${pct > 0 ? pct.toFixed(1) + '%' : ''}</span>
         </div>
-        <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">${esc(t.progress || '')}</div>`
+        <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">${esc(t.progress || '')}</div>
+        ${t.output_file ? `<div style="font-size:11px;color:var(--success);margin-top:2px;word-break:break-all">📁 ${esc(t.output_file)}</div>` : ''}`
       : esc(t.progress || '-');
     return `<tr>
       <td class="url-cell" title="${esc(t.url)}">${esc(t.url)}</td>
@@ -582,6 +590,43 @@ function formatTime(ts) {
   return d.toLocaleString('zh-CN', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
 }
 
+// ---- Files List ----
+async function refreshFiles() {
+  const el = document.getElementById('file-list');
+  try {
+    const res = await fetch('/api/files');
+    const data = await res.json();
+    if (!data.exists) {
+      el.innerHTML = `⚠️ 目录不存在: <code>${esc(data.dir)}</code><br><span style="font-size:12px">${esc(data.error || '')}</span>`;
+      return;
+    }
+    if (data.files.length === 0) {
+      el.innerHTML = `目录 <code>${esc(data.dir)}</code> 为空`;
+      return;
+    }
+    const rows = data.files.map(f => `<tr>
+      <td>${f.is_dir ? '📂' : '🎬'} ${esc(f.name)}</td>
+      <td>${f.is_dir ? '-' : formatSize(f.size)}</td>
+      <td>${formatTime(f.mod_time)}</td>
+    </tr>`).join('');
+    el.innerHTML = `<div style="margin-bottom:4px;font-size:12px">目录: <code>${esc(data.dir)}</code>（${data.files.length} 项）</div>
+      <table class="task-table">
+        <thead><tr><th>文件名</th><th>大小</th><th>时间</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  } catch(e) {
+    el.innerHTML = '加载失败: ' + esc(e.message);
+  }
+}
+
+function formatSize(bytes) {
+  if (!bytes) return '-';
+  const units = ['B','KB','MB','GB'];
+  let i = 0;
+  while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; }
+  return bytes.toFixed(1) + ' ' + units[i];
+}
+
 // ---- WebSocket ----
 function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -607,7 +652,12 @@ function connectWS() {
 // ---- Init ----
 loadConfig();
 renderTasks();
+refreshFiles();
 connectWS();
+// Refresh file list when a task reaches terminal state
+setInterval(() => {
+  if (tasks.some(t => t.status === 'done' || t.status === 'failed')) refreshFiles();
+}, 15000);
 </script>
 </body>
 </html>

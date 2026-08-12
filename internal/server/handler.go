@@ -5,7 +5,10 @@ import (
 	"log"
 	"maps"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/yuzl1/go-m3u8/internal/config"
 	"github.com/yuzl1/go-m3u8/internal/download"
@@ -178,6 +181,62 @@ func (h *Handler) RetryTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, task)
+}
+
+// ListFiles lists files in the configured save directory.
+func (h *Handler) ListFiles(w http.ResponseWriter, r *http.Request) {
+	cfg := h.Config.Get()
+	dir := cfg.SaveDir
+	if dir == "" {
+		dir = "./downloads"
+	}
+	if !filepath.IsAbs(dir) {
+		if abs, err := filepath.Abs(dir); err == nil {
+			dir = abs
+		}
+	}
+
+	type fileInfo struct {
+		Name    string    `json:"name"`
+		Size    int64     `json:"size"`
+		ModTime time.Time `json:"mod_time"`
+		IsDir   bool      `json:"is_dir"`
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"dir":    dir,
+			"exists": false,
+			"error":  err.Error(),
+			"files":  []fileInfo{},
+		})
+		return
+	}
+
+	files := make([]fileInfo, 0, len(entries))
+	for _, e := range entries {
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		files = append(files, fileInfo{
+			Name:    e.Name(),
+			Size:    info.Size(),
+			ModTime: info.ModTime(),
+			IsDir:   info.IsDir(),
+		})
+	}
+	// Newest first
+	for i, j := 0, len(files)-1; i < j; i, j = i+1, j-1 {
+		files[i], files[j] = files[j], files[i]
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"dir":    dir,
+		"exists": true,
+		"files":  files,
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {
