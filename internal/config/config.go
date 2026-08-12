@@ -10,33 +10,37 @@ import (
 
 // Config holds all persistent configuration for the app.
 type Config struct {
-	SaveDir        string            `json:"save_dir"`
-	TempDir        string            `json:"tmp_dir"`
-	ThreadCount    int               `json:"thread_count"`
-	AutoSelect     bool              `json:"auto_select"`
-	DelAfterDone   bool              `json:"del_after_done"`
-	Concurrent     bool              `json:"concurrent"`
-	MaxConcurrent  int               `json:"max_concurrent"`
-	DefaultHeaders map[string]string `json:"default_headers"`
-	BaseURL        string            `json:"base_url"`
-	Nm3u8dlPath    string            `json:"nm3u8dl_path"`
-	Port           int               `json:"port"`
+	SaveDir            string            `json:"save_dir"`
+	TempDir            string            `json:"tmp_dir"`
+	ThreadCount        int               `json:"thread_count"`
+	AutoSelect         bool              `json:"auto_select"`
+	DelAfterDone       bool              `json:"del_after_done"`
+	Concurrent         bool              `json:"concurrent"`
+	MaxConcurrent      int               `json:"max_concurrent"`
+	DownloadRetryCount int               `json:"download_retry_count"` // per-segment retry, passed to N_m3u8DL-RE
+	CheckSegments      bool              `json:"check_segments"`       // verify segment count before muxing
+	DefaultHeaders     map[string]string `json:"default_headers"`
+	BaseURL            string            `json:"base_url"`
+	Nm3u8dlPath        string            `json:"nm3u8dl_path"`
+	Port               int               `json:"port"`
 }
 
 // DefaultConfig returns sensible defaults.
 func DefaultConfig() *Config {
 	return &Config{
-		SaveDir:        "./downloads",
-		TempDir:        "",
-		ThreadCount:    16,
-		AutoSelect:     true,
-		DelAfterDone:   true,
-		Concurrent:     true,
-		MaxConcurrent:  3,
-		DefaultHeaders: map[string]string{},
-		BaseURL:        "",
-		Nm3u8dlPath:    "N_m3u8DL-RE",
-		Port:           8080,
+		SaveDir:            "./downloads",
+		TempDir:            "",
+		ThreadCount:        16,
+		AutoSelect:         true,
+		DelAfterDone:       true,
+		Concurrent:         true,
+		MaxConcurrent:      3,
+		DownloadRetryCount: 5,
+		CheckSegments:      true,
+		DefaultHeaders:     map[string]string{},
+		BaseURL:            "",
+		Nm3u8dlPath:        "N_m3u8DL-RE",
+		Port:               8080,
 	}
 }
 

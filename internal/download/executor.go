@@ -71,6 +71,16 @@ func BuildCommand(cfg *config.Config, task *Task) (string, []string) {
 		args = append(args, "--thread-count", fmt.Sprintf("%d", cfg.ThreadCount))
 	}
 
+	// Per-segment download retry count
+	if cfg.DownloadRetryCount > 0 {
+		args = append(args, "--download-retry-count", fmt.Sprintf("%d", cfg.DownloadRetryCount))
+	}
+
+	// Segment count check before muxing
+	if !cfg.CheckSegments {
+		args = append(args, "--check-segments-count", "false")
+	}
+
 	// Auto select
 	if cfg.AutoSelect {
 		args = append(args, "--auto-select")
@@ -153,34 +163,39 @@ func Run(ctx context.Context, cfg *config.Config, task *Task, statusCh chan<- *T
 		cmd := exec.CommandContext(ctx, exe, args...)
 		err := runStreaming(cmd, task, statusCh)
 
-		if err == nil {
-			// Exit code 0 — but verify the file actually exists.
-			if task.OutputFile == "" {
-				task.OutputFile = findNewestFile(saveDir, task.CreatedAt)
-			}
-			if task.OutputFile == "" && saveDir != "" {
-				task.Status = "failed"
-				task.Error = fmt.Sprintf(
-					"N_m3u8DL-RE exited successfully but no output file was found in %s.\n\nFull log:\n%s",
-					saveDir, tailLog(task.Log, 4000))
-				task.Progress = ""
-				notify(statusCh, task)
-				return fmt.Errorf("no output file found in %s", saveDir)
-			}
-			task.Status = "done"
-			task.Progress = "Download complete"
-			task.Percent = 100
-			task.Error = ""
-			notify(statusCh, task)
-			return nil
-		}
-
 		// Check if cancelled
 		if ctx.Err() != nil {
 			task.Status = "cancelled"
 			task.Progress = ""
 			notify(statusCh, task)
 			return ctx.Err()
+		}
+
+		// N_m3u8DL-RE exits 0 on some fatal errors (e.g. segment count
+		// check failure) — detect them from the log.
+		if err == nil && checkLogForFailure(task.Log) {
+			err = fmt.Errorf("N_m3u8DL-RE logged fatal errors but exited 0:\n%s", tailLog(task.Log, 4000))
+		}
+
+		if err == nil {
+			// Verify the file actually exists.
+			if task.OutputFile == "" {
+				task.OutputFile = findNewestFile(saveDir, task.CreatedAt)
+			}
+			if task.OutputFile == "" && saveDir != "" {
+				err = fmt.Errorf(
+					"no output file was found in %s (exit code 0)\n\nFull log:\n%s",
+					saveDir, tailLog(task.Log, 4000))
+			}
+		}
+
+		if err == nil {
+			task.Status = "done"
+			task.Progress = "Download complete"
+			task.Percent = 100
+			task.Error = ""
+			notify(statusCh, task)
+			return nil
 		}
 
 		lastErr = err
@@ -203,7 +218,17 @@ var (
 	totalSegRe = regexp.MustCompile(`(?i)(?:total\s+segments?|分片总数|total)[^\d]{0,20}(\d+)`)
 	ansiRe     = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
 	outFileRe  = regexp.MustCompile(`(?i)(?:muxing\s+to|output(?: file)?[^:]*:|muxed\s+to|saving\s+to)\s+(.+)`)
+	// failureRe matches fatal errors in N_m3u8DL-RE output. It logs
+	// "ERROR: Failed" on segment-count-check failure but still exits 0,
+	// so we must detect failure from the log, not just the exit code.
+	failureRe = regexp.MustCompile(`(?i)(segment count check not pass|check segments count not pass|^.*ERROR:\s*failed|fatal error)`)
 )
+
+// checkLogForFailure reports whether the captured output contains a fatal
+// error even though the process exited 0.
+func checkLogForFailure(log string) bool {
+	return failureRe.MatchString(log)
+}
 
 // splitAnyLine splits on \n or \r — N_m3u8DL-RE redraws its progress bar
 // with \r, so plain \n scanning would swallow all progress updates into

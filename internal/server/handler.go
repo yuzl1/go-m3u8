@@ -45,6 +45,9 @@ func (h *Handler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
 	if cfg.ThreadCount <= 0 {
 		cfg.ThreadCount = 16
 	}
+	if cfg.DownloadRetryCount <= 0 {
+		cfg.DownloadRetryCount = 5
+	}
 	if cfg.Port <= 0 {
 		cfg.Port = 8080
 	}
