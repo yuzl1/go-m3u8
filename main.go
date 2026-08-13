@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"flag"
 	"log"
@@ -76,6 +77,43 @@ func main() {
 
 	// Create and start server.
 	srv := server.New(store, mgr, wsHandler, hub, tmpl)
+
+	// Clash subscription: refresh hourly so node lists stay current.
+	go func() {
+		for {
+			time.Sleep(1 * time.Hour)
+			cfg := store.Get()
+			if !cfg.ClashEnabled || cfg.ClashSubscribeURL == "" {
+				continue
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			yaml, err := clash.FetchSubscription(ctx, cfg.ClashSubscribeURL)
+			cancel()
+			if err != nil {
+				log.Printf("Hourly subscription refresh failed: %v", err)
+				continue
+			}
+			if yaml == cfg.ClashYAML {
+				continue // unchanged
+			}
+			if secret := clash.ExtractSecret(yaml); secret != "" {
+				cfg.ClashSecret = secret
+			}
+			cfg.ClashYAML = yaml
+			if err := store.Update(cfg); err != nil {
+				log.Printf("Failed to persist refreshed subscription: %v", err)
+				continue
+			}
+			log.Printf("Subscription auto-refreshed: %d bytes", len(yaml))
+			mgr.InvalidateClashCache()
+			go func() {
+				c := clash.New(cfg.ClashAPI, cfg.ClashSecret)
+				if err := c.UploadConfig(clash.SanitizePayload(yaml)); err != nil {
+					log.Printf("Failed to push refreshed subscription: %v", err)
+				}
+			}()
+		}
+	}()
 
 	// Push the stored clash config on startup (the mihomo sidecar starts
 	// empty and needs the user's config after every restart).

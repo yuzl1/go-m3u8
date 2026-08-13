@@ -503,12 +503,17 @@ AGENT_DIR=/downloads</div>
         </div>
       </div>
       <div class="form-group" style="margin-bottom:12px">
-        <label>Clash 配置文件内容（粘贴你的 yaml，保存后自动推送到 clash 内核）</label>
+        <label>Clash 订阅地址（推荐：填了就不用手动粘贴配置，保存时立即拉取，每小时自动更新）</label>
+        <input name="clash_subscribe_url" placeholder="https://xxx.com/api/v1/client/subscribe?token=xxx">
+      </div>
+      <div class="form-group" style="margin-bottom:12px">
+        <label>Clash 配置文件内容（订阅地址为空时使用；也可手动粘贴，保存后自动推送到 clash 内核）</label>
         <textarea id="clash-yaml-textarea" name="clash_yaml" rows="6" placeholder="mixed-port: 7890&#10;proxies:&#10;  - name: 节点1&#10;    type: ss&#10;    server: ...&#10;    port: ...&#10;    cipher: ...&#10;    password: ...&#10;proxy-groups:&#10;  - name: 🚀 节点选择&#10;    type: select&#10;    proxies: [节点1]"></textarea>
       </div>
       <div class="form-row" style="align-items:center">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="refreshSubscription()">🔄 立即更新订阅</button>
         <button type="button" class="btn btn-ghost btn-sm" onclick="testClash()">🧪 测试 Clash 连接</button>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="testClash(true)">🔄 重新检测节点</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="testClash(true)">🔁 重新检测节点</button>
         <span id="clash-status" style="font-size:13px;color:var(--text-secondary)"></span>
       </div>
       <div id="clash-node-list" style="margin-top:10px"></div>
@@ -818,6 +823,24 @@ async function deleteTask(id) {
 async function retryTask(id) { await fetch('/api/tasks/' + id + '/retry', {method:'POST'}); }
 
 // ---- Clash ----
+async function refreshSubscription() {
+  try {
+    await saveConfig(); // 先保存订阅地址
+    const res = await fetch('/api/clash/subscribe', {method:'POST'});
+    const d = await res.json();
+    const statusEl = document.getElementById('clash-status');
+    if (!res.ok) {
+      statusEl.innerHTML = '❌ 订阅更新失败: ' + esc(d.error || res.status);
+      return;
+    }
+    statusEl.innerHTML = `✅ 订阅已更新（${d.size} 字节，${d.proxies} 个节点）`;
+    loadConfig(); // 回填拉取到的配置
+    testClash(true); // 重新检测节点健康
+  } catch(e) {
+    document.getElementById('clash-status').innerHTML = '❌ ' + esc(e.message);
+  }
+}
+
 async function testClash(forceRefresh) {
   try {
     await saveConfig(); // 先保存（包括推送 clash yaml）

@@ -117,6 +117,14 @@ func New(cfgStore *config.Store, manager *download.Manager, wsHandler *ws.Handle
 		h.ClashStatus(w, r)
 	})
 
+	mux.HandleFunc("/api/clash/subscribe", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		h.ClashSubscribe(w, r)
+	})
+
 	// Agent control channel + file pull endpoints
 	mux.HandleFunc("/agent/ws", hub.HandleWS)
 	mux.HandleFunc("/agent/files/", hub.ServeFile)

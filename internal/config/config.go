@@ -48,6 +48,10 @@ type Config struct {
 	ClashGroup   string `json:"clash_group"`  // selector group name, empty = auto-detect
 	ClashYAML    string `json:"clash_yaml"`   // user's clash config content
 
+	// Clash subscription: fetch config from a subscription URL (base64 /
+	// v2ray links auto-converted). Refreshed on save and hourly.
+	ClashSubscribeURL string `json:"clash_subscribe_url"`
+
 	// Filename handling: which cat-catch field becomes the saved name,
 	// and optional translation of the filename (e.g. English -> Chinese).
 	FilenameSource    string `json:"filename_source"`    // auto | title | fullFileName

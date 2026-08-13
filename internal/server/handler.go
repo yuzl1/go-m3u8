@@ -94,12 +94,66 @@ func (h *Handler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
 		}(cfg)
 	}
 
+	// Clash subscription: fetch on save so the user doesn't need to
+	// paste YAML manually.
+	if cfg.ClashEnabled && cfg.ClashSubscribeURL != "" {
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		yaml, err := clash.FetchSubscription(ctx, cfg.ClashSubscribeURL)
+		cancel()
+		if err != nil {
+			log.Printf("Subscription fetch failed: %v", err)
+		} else {
+			cfg.ClashYAML = yaml
+			if secret := clash.ExtractSecret(yaml); secret != "" {
+				cfg.ClashSecret = secret
+			}
+			log.Printf("Subscription fetched: %d bytes, %d proxies", len(yaml), strings.Count(yaml, "\n  - name:"))
+		}
+	}
+
 	if err := h.Config.Update(&cfg); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	h.Manager.RefreshSem()
 	writeJSON(w, http.StatusOK, cfg)
+}
+
+// ClashSubscribe refreshes the subscription now (POST /api/clash/subscribe).
+func (h *Handler) ClashSubscribe(w http.ResponseWriter, r *http.Request) {
+	cfg := h.Config.Get()
+	if cfg.ClashSubscribeURL == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "未配置订阅地址 (clash_subscribe_url)"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	yaml, err := clash.FetchSubscription(ctx, cfg.ClashSubscribeURL)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	if secret := clash.ExtractSecret(yaml); secret != "" {
+		cfg.ClashSecret = secret
+	}
+	cfg.ClashYAML = yaml
+	if err := h.Config.Update(cfg); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	// Push to the sidecar + drop the stale healthy-node cache.
+	go func() {
+		c := clash.New(cfg.ClashAPI, cfg.ClashSecret)
+		if err := c.UploadConfig(clash.SanitizePayload(yaml)); err != nil {
+			log.Printf("Failed to push refreshed subscription: %v", err)
+		}
+	}()
+	h.Manager.InvalidateClashCache()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"size":    len(yaml),
+		"proxies": strings.Count(yaml, "\n  - name:"),
+	})
 }
 
 // ClashStatus reports clash connectivity, the rotation group, the
