@@ -64,16 +64,21 @@ func (h *Handler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
 
 // Download triggers a new download task.
 // Supports both GET (query params) and POST (JSON body or form).
+// JSON field names match Cat-Catch replacement tags (userAgent,
+// fullFileName, ...) so a POST body template can use ${...} directly.
 func (h *Handler) Download(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		URL     string            `json:"url"`
-		Title   string            `json:"title"`
-		Referer string            `json:"referer"`
-		Cookie  string            `json:"cookie"`
-		UA      string            `json:"ua"`
-		BaseURL string            `json:"base_url"`
-		SaveDir string            `json:"save_dir"`
-		Headers map[string]string `json:"headers"`
+		URL          string            `json:"url"`
+		Title        string            `json:"title"`
+		Referer      string            `json:"referer"`
+		Cookie       string            `json:"cookie"`
+		UA           string            `json:"ua"`        // alias of userAgent
+		UserAgent    string            `json:"userAgent"` // cat-catch tag ${userAgent}
+		FileName     string            `json:"fileName"`     // cat-catch tag ${fileName}, no extension
+		FullFileName string            `json:"fullFileName"` // cat-catch tag ${fullFileName}
+		BaseURL      string            `json:"base_url"`
+		SaveDir      string            `json:"save_dir"`
+		Headers      map[string]string `json:"headers"`
 	}
 
 	switch r.Method {
@@ -84,6 +89,9 @@ func (h *Handler) Download(w http.ResponseWriter, r *http.Request) {
 		req.Referer = q.Get("referer")
 		req.Cookie = q.Get("cookie")
 		req.UA = q.Get("ua")
+		req.UserAgent = q.Get("userAgent")
+		req.FileName = q.Get("fileName")
+		req.FullFileName = q.Get("fullFileName")
 		req.BaseURL = q.Get("base_url")
 		req.SaveDir = q.Get("save_dir")
 
@@ -105,6 +113,9 @@ func (h *Handler) Download(w http.ResponseWriter, r *http.Request) {
 			req.Referer = r.FormValue("referer")
 			req.Cookie = r.FormValue("cookie")
 			req.UA = r.FormValue("ua")
+			req.UserAgent = r.FormValue("userAgent")
+			req.FileName = r.FormValue("fileName")
+			req.FullFileName = r.FormValue("fullFileName")
 			req.BaseURL = r.FormValue("base_url")
 			req.SaveDir = r.FormValue("save_dir")
 		}
@@ -123,13 +134,25 @@ func (h *Handler) Download(w http.ResponseWriter, r *http.Request) {
 	if req.Cookie != "" {
 		headers["Cookie"] = req.Cookie
 	}
-	if req.UA != "" {
-		headers["User-Agent"] = req.UA
+	userAgent := req.UserAgent
+	if userAgent == "" {
+		userAgent = req.UA
+	}
+	if userAgent != "" {
+		headers["User-Agent"] = userAgent
 	}
 	// Merge extra headers from JSON post.
 	maps.Copy(headers, req.Headers)
 
-	task := h.Manager.Submit(req.URL, req.Title, headers, req.BaseURL, req.SaveDir)
+	// Save name: prefer fileName/fullFileName tags, fall back to title.
+	saveName := req.Title
+	if req.FileName != "" {
+		saveName = req.FileName
+	} else if req.FullFileName != "" {
+		saveName = strings.TrimSuffix(req.FullFileName, filepath.Ext(req.FullFileName))
+	}
+
+	task := h.Manager.Submit(req.URL, saveName, headers, req.BaseURL, req.SaveDir)
 	log.Printf("New download task: id=%s url=%s title=%s", task.ID, task.URL, task.Title)
 	writeJSON(w, http.StatusAccepted, task)
 }

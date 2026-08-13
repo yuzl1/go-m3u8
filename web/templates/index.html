@@ -451,18 +451,44 @@ h2 {
     <p style="margin-bottom:12px;color:var(--text-secondary);font-size:13px">
       参考官方文档：<a href="https://cat-catch.94cat.com/docs/settings#send" target="_blank" rel="noopener" style="color:var(--primary)">cat-catch.94cat.com/docs/settings#send</a>
     </p>
-    <h3 style="font-size:14px;margin-bottom:8px">调用程序 URL 模板</h3>
-    <div class="cat-catch-code" id="catcatch-url">http://localhost:8080/api/download?url=${url}&title=${title}&referer=${referer}</div>
+
+    <h3 style="font-size:14px;margin-bottom:8px">方式一：POST JSON（推荐）</h3>
     <p class="cat-catch-note">
-      可用变量：<code>${url}</code>（m3u8地址）、<code>${title}</code>（页面标题）、<code>${referer}</code>（来源页）、<code>${cookie}</code>、<code>${userAgent}</code>
+      猫抓 → 设置 → 调用程序 → 新增，配置如下：
     </p>
-    <h3 style="font-size:14px;margin-bottom:8px">curl 测试</h3>
+    <p class="cat-catch-note" style="font-weight:600;margin-bottom:4px">① 请求方式：POST</p>
+    <p class="cat-catch-note" style="font-weight:600;margin-bottom:4px">② 地址：</p>
+    <div class="cat-catch-code" id="catcatch-post-url">http://localhost:8080/api/download</div>
+    <p class="cat-catch-note" style="font-weight:600;margin-bottom:4px">③ Content-Type：application/json</p>
+    <p class="cat-catch-note" style="font-weight:600;margin-bottom:4px">④ 请求体（标签会被猫抓自动替换）：</p>
+    <div class="cat-catch-code" id="catcatch-post-body">{"url":"${url}","title":"${title}","referer":"${referer}","cookie":"${cookie}","userAgent":"${userAgent}","fullFileName":"${fullFileName}"}</div>
+
+    <h3 style="font-size:14px;margin:18px 0 8px">方式二：GET（简单模式）</h3>
+    <p class="cat-catch-note">调用程序地址模板：</p>
+    <div class="cat-catch-code" id="catcatch-url">http://localhost:8080/api/download?url=${url}&title=${title}&referer=${referer}</div>
+
+    <h3 style="font-size:14px;margin:18px 0 8px">常用替换标签</h3>
+    <table class="doc-table">
+      <tr><th>标签</th><th>说明</th><th>示例</th></tr>
+      <tr><td><code>${url}</code></td><td>资源地址</td><td>https://bmmmd.com/test.mp4</td></tr>
+      <tr><td><code>${referer}</code></td><td>资源请求头；不存在则不输出</td><td>https://bmmmd.com/</td></tr>
+      <tr><td><code>${initiator}</code></td><td>类似永远有值的 referer</td><td>https://bmmmd.com</td></tr>
+      <tr><td><code>${webUrl}</code></td><td>资源播放页面地址</td><td>https://bmmmd.com/test.html</td></tr>
+      <tr><td><code>${title}</code></td><td>播放页面标题</td><td>测试视频</td></tr>
+      <tr><td><code>${fullFileName}</code></td><td>完整文件名（作为保存名）</td><td>test.mp4</td></tr>
+      <tr><td><code>${fileName}</code></td><td>文件名不含扩展</td><td>test</td></tr>
+      <tr><td><code>${userAgent}</code></td><td>User Agent</td><td>Mozilla/5.0 ...</td></tr>
+      <tr><td><code>${cookie}</code></td><td>资源 Cookie（需猫抓 2.3.8+）</td><td>key=value;key2=value2;</td></tr>
+    </table>
+    <p class="cat-catch-note">注：POST body 中 <code>cookie</code>、<code>userAgent</code> 等字段为空时服务端会自动忽略。</p>
+
+    <h3 style="font-size:14px;margin:18px 0 8px">curl 测试</h3>
     <div class="cat-catch-code">curl "http://localhost:8080/api/download?url=...&title=test&referer=..."</div>
-    <h3 style="font-size:14px;margin:14px 0 8px">POST JSON 方式</h3>
-    <div class="cat-catch-code">curl -X POST "http://localhost:8080/api/download" \
+    <div class="cat-catch-code" style="margin-top:6px">curl -X POST "http://localhost:8080/api/download" \
   -H "Content-Type: application/json" \
   -d '{"url":"https://example.com/video.m3u8","title":"我的视频","referer":"https://example.com/"}'</div>
-    <h3 style="font-size:14px;margin:14px 0 8px">API 端点参考</h3>
+
+    <h3 style="font-size:14px;margin:18px 0 8px">API 端点参考</h3>
     <table class="doc-table">
       <tr><th>方法</th><th>路径</th><th>说明</th></tr>
       <tr><td>GET/POST</td><td>/api/download</td><td>触发下载（querystring 或 JSON body）</td></tr>
@@ -541,6 +567,10 @@ async function loadConfig() {
     const port = cfg.port || 8080;
     document.getElementById('catcatch-url').textContent =
       `http://localhost:${port}/api/download?url=$\{url}&title=$\{title}&referer=$\{referer}`;
+    document.getElementById('catcatch-post-url').textContent =
+      `http://localhost:${port}/api/download`;
+    document.getElementById('catcatch-post-body').textContent =
+      `{"url":"$\{url}","title":"$\{title}","referer":"$\{referer}","cookie":"$\{cookie}","userAgent":"$\{userAgent}","fullFileName":"$\{fullFileName}"}`;
   } catch(e) { console.error('loadConfig', e); }
 }
 
