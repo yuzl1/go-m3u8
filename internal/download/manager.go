@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/yuzl1/go-m3u8/internal/config"
@@ -30,6 +31,9 @@ type Manager struct {
 
 	// onTaskDone is invoked after a download completes successfully.
 	onTaskDone func(*Task)
+
+	// proxyCounter round-robins the proxy pool across tasks.
+	proxyCounter atomic.Uint32
 
 	// Concurrency control: buffered channel as semaphore.
 	sem chan struct{}
@@ -142,14 +146,15 @@ func (m *Manager) MarkSynced(id, agentName string) {
 func (m *Manager) Submit(url, title string, headers map[string]string, baseURL, saveDir string) *Task {
 	id := newID()
 	task := &Task{
-		ID:        id,
-		URL:       url,
-		Title:     title,
-		Status:    "pending",
-		CreatedAt: time.Now(),
-		Headers:   headers,
-		BaseURL:   baseURL,
-		SaveDir:   saveDir,
+		ID:          id,
+		URL:         url,
+		Title:       title,
+		Status:      "pending",
+		CreatedAt:   time.Now(),
+		Headers:     headers,
+		BaseURL:     baseURL,
+		SaveDir:     saveDir,
+		ProxyOffset: int(m.proxyCounter.Add(1)) - 1,
 	}
 
 	m.mu.Lock()

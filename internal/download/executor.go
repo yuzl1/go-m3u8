@@ -34,6 +34,7 @@ type Task struct {
 	SyncedTo      string            `json:"synced_to,omitempty"`
 	OriginalName  string            `json:"original_name,omitempty"` // pre-translation name
 	Translated    bool              `json:"translated,omitempty"`    // filename was translated
+	ProxyOffset   int               `json:"-"`                       // rotation start index into the proxy pool
 	Error         string            `json:"error,omitempty"`
 	CreatedAt     time.Time         `json:"created_at"`
 	Headers       map[string]string `json:"headers,omitempty"`
@@ -43,7 +44,9 @@ type Task struct {
 }
 
 // BuildCommand builds the N_m3u8DL-RE command-line for a task.
-func BuildCommand(cfg *config.Config, task *Task) (string, []string) {
+// proxy, when non-empty, is passed as --proxy (one proxy per process —
+// the manager rotates proxies across tasks and retry attempts).
+func BuildCommand(cfg *config.Config, task *Task, proxy string) (string, []string) {
 	args := []string{}
 
 	// Input URL
@@ -110,6 +113,11 @@ func BuildCommand(cfg *config.Config, task *Task) (string, []string) {
 		args = append(args, "--base-url", baseURL)
 	}
 
+	// HTTP proxy for this attempt (rotated by the caller)
+	if proxy != "" {
+		args = append(args, "--proxy", proxy)
+	}
+
 	// Headers: merge task headers with default headers
 	headers := make(map[string]string)
 	maps.Copy(headers, cfg.DefaultHeaders)
@@ -146,17 +154,28 @@ const maxLogBytes = 64 * 1024
 // Retries up to maxRetries times on failure. After a successful exit it
 // verifies an output file actually appeared in the save directory.
 func Run(ctx context.Context, cfg *config.Config, task *Task, statusCh chan<- *Task) error {
-	exe, args := BuildCommand(cfg, task)
+	exe := cfg.Nm3u8dlPath
 	saveDir := resolveSaveDir(cfg, task)
-
-	// NOTE: += preserves any log content written before Run (e.g. the
-	// translation diagnostics from the download pipeline).
-	task.Log += "== Command ==\n" + exe + " " + strings.Join(args, " ") + "\n\n"
+	proxies := cfg.ProxyList
 
 	var lastErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {
+		// Rotate proxy per attempt so retries don't hammer the same IP.
+		proxy := ""
+		if len(proxies) > 0 {
+			proxy = proxies[(task.ProxyOffset+attempt-1)%len(proxies)]
+		}
+		_, args := BuildCommand(cfg, task, proxy)
+
+		// NOTE: += preserves any log content written before Run (e.g. the
+		// translation diagnostics from the download pipeline).
+		if attempt == 1 {
+			task.Log += "== Command ==\n" + exe + " " + strings.Join(args, " ") + "\n\n"
+		} else {
+			task.Log += fmt.Sprintf("\n== Retry attempt %d/%d ==\n%s %s\n", attempt, maxRetries, exe, strings.Join(args, " "))
+		}
+
 		if attempt > 1 {
-			task.Log += fmt.Sprintf("\n== Retry attempt %d/%d ==\n", attempt, maxRetries)
 			task.Progress = fmt.Sprintf("Retrying (attempt %d/%d)...", attempt, maxRetries)
 			task.Percent = 0
 			task.DoneSegments = 0

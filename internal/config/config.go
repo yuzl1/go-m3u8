@@ -32,6 +32,11 @@ type Config struct {
 	DeleteAfterSync   bool   `json:"delete_after_sync"`   // delete local file after sync
 	SyncConnections   int    `json:"sync_connections"`    // parallel chunk connections for sync (1-16)
 
+	// Proxy pool for downloads: rotated per task and per retry attempt so
+	// a single egress IP doesn't get rate-limited by the video site.
+	// One proxy per line, e.g. http://ip:port or http://user:pass@ip:port
+	ProxyList []string `json:"proxy_list"`
+
 	// Filename handling: which cat-catch field becomes the saved name,
 	// and optional translation of the filename (e.g. English -> Chinese).
 	FilenameSource    string `json:"filename_source"`    // auto | title | fullFileName

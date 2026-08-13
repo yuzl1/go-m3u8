@@ -482,6 +482,10 @@ AGENT_DIR=/downloads</div>
         <input name="agent_token" placeholder="自动生成">
       </div>
       <div class="form-group" style="margin-bottom:12px">
+        <label>HTTP 代理池（每行一个，如 http://ip:port；任务和重试自动轮换，降低单 IP 限流）</label>
+        <textarea id="proxies-textarea" rows="2" placeholder="http://1.2.3.4:8888&#10;http://5.6.7.8:8888"></textarea>
+      </div>
+      <div class="form-group" style="margin-bottom:12px">
         <label>全局 Base URL</label>
         <input name="base_url" placeholder="留空不使用">
       </div>
@@ -625,6 +629,7 @@ document.getElementById('modal').addEventListener('click', function(e) {
 const configForm = document.getElementById('config-form');
 const configSaved = document.getElementById('config-saved');
 const headersTextarea = document.getElementById('headers-textarea');
+const proxiesTextarea = document.getElementById('proxies-textarea');
 
 async function loadConfig() {
   try {
@@ -633,6 +638,8 @@ async function loadConfig() {
     for (const [key, val] of Object.entries(cfg)) {
       if (key === 'default_headers') {
         headersTextarea.value = Object.entries(val || {}).map(([k,v]) => k + ': ' + v).join('\n');
+      } else if (key === 'proxy_list') {
+        proxiesTextarea.value = (val || []).join('\n');
       } else {
         const el = configForm.elements[key];
         if (el) {
@@ -670,6 +677,8 @@ function collectConfig() {
     const idx = line.indexOf(':');
     if (idx > 0) data.default_headers[line.slice(0, idx).trim()] = line.slice(idx+1).trim();
   }
+  data.proxy_list = proxiesTextarea.value.split('\n')
+    .map(s => s.trim()).filter(s => s.length > 0);
   data.thread_count = parseInt(data.thread_count) || 16;
   data.download_retry_count = parseInt(data.download_retry_count) || 5;
   data.max_concurrent = parseInt(data.max_concurrent) || 3;
