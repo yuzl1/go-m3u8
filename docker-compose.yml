@@ -2,7 +2,7 @@
 # 如需本地构建：docker compose -f docker-compose.yml -f docker-compose.build.yml up -d
 services:
   go-m3u8:
-    image: ${DOCKERHUB_USER:-yuzl1}/go-m3u8:latest
+    image: ${DOCKERHUB_USER:-yu1998}/go-m3u8:latest
     container_name: go-m3u8
     ports:
       - "5000:8080"

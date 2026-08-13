@@ -39,8 +39,8 @@
 **c. 触发构建**
 
 推送代码到 `master` 或 `agent` 分支即自动构建：
-- `master` 分支 → `yuzl1/go-m3u8:latest`
-- `agent` 分支 → `yuzl1/go-m3u8:agent`
+- `master` 分支 → `yu1998/go-m3u8:latest`
+- `agent` 分支 → `yu1998/go-m3u8:agent`
 - 同时构建 **linux/amd64 + linux/arm64** 双架构（Oracle ARM 服务器直接可用）
 
 > 仓库 Actions 页面可查看构建进度。也可手动：Actions → Build and Push Docker Image → Run workflow。

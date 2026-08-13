@@ -14,7 +14,7 @@
 services:
   go-m3u8-agent:
     # 与主服务同一个镜像（GitHub Actions 构建推送到 Docker Hub）
-    image: ${DOCKERHUB_USER:-yuzl1}/go-m3u8:latest
+    image: ${DOCKERHUB_USER:-yu1998}/go-m3u8:latest
     container_name: go-m3u8-agent
     command: ["go-m3u8", "-agent"]
     environment:
