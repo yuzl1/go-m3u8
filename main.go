@@ -94,7 +94,7 @@ func main() {
 				continue
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			yaml, err := clash.FetchSubscription(ctx, cfg.ClashSubscribeURL)
+			yaml, err := clash.FetchSubscriptionCached(ctx, cfg.ClashSubscribeURL)
 			cancel()
 			if err != nil {
 				log.Printf("Hourly subscription refresh failed: %v", err)

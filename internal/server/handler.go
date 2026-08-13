@@ -132,7 +132,7 @@ func (h *Handler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
 	// paste YAML manually.
 	if cfg.ClashEnabled && cfg.ClashSubscribeURL != "" {
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-		yaml, err := clash.FetchSubscription(ctx, cfg.ClashSubscribeURL)
+		yaml, err := clash.FetchSubscriptionCached(ctx, cfg.ClashSubscribeURL)
 		cancel()
 		if err != nil {
 			log.Printf("Subscription fetch failed: %v", err)
@@ -141,7 +141,8 @@ func (h *Handler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
 			if secret := clash.ExtractSecret(yaml); secret != "" {
 				cfg.ClashSecret = secret
 			}
-			log.Printf("Subscription fetched: %d bytes, %d proxies", len(yaml), strings.Count(yaml, "\n  - name:"))
+			names, _ := clash.ParseProxyNames(yaml)
+			log.Printf("Subscription fetched: %d bytes, %d proxies", len(yaml), len(names))
 		}
 	}
 
@@ -162,7 +163,7 @@ func (h *Handler) ClashSubscribe(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	yaml, err := clash.FetchSubscription(ctx, cfg.ClashSubscribeURL)
+	yaml, err := clash.FetchSubscriptionCached(ctx, cfg.ClashSubscribeURL)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
@@ -183,10 +184,11 @@ func (h *Handler) ClashSubscribe(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	h.Manager.InvalidateClashCache()
+	names, _ := clash.ParseProxyNames(yaml)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
 		"size":    len(yaml),
-		"proxies": strings.Count(yaml, "\n  - name:"),
+		"proxies": len(names),
 	})
 }
 

@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
 // FetchSubscription downloads a clash subscription and returns a clash
@@ -50,6 +52,45 @@ func FetchSubscription(ctx context.Context, subURL string) (string, error) {
 		return yaml, nil
 	}
 	return "", fmt.Errorf("unrecognized subscription format (not yaml, not v2ray links)")
+}
+
+// Subscription fetch cache: airports rate-limit subscription requests
+// (HTTP 429), so saves/refreshes share one fetch per 5 minutes and
+// fall back to stale content while limited.
+var subCache = struct {
+	sync.Mutex
+	m map[string]subEntry
+}{m: map[string]subEntry{}}
+
+type subEntry struct {
+	yaml   string
+	expiry time.Time
+}
+
+// FetchSubscriptionCached wraps FetchSubscription with a 5-minute cache.
+// On fetch errors the last successful content is served (logged).
+func FetchSubscriptionCached(ctx context.Context, subURL string) (string, error) {
+	subCache.Lock()
+	if e, ok := subCache.m[subURL]; ok && time.Now().Before(e.expiry) {
+		subCache.Unlock()
+		return e.yaml, nil
+	}
+	subCache.Unlock()
+
+	yaml, err := FetchSubscription(ctx, subURL)
+	if err != nil {
+		subCache.Lock()
+		if e, ok := subCache.m[subURL]; ok && e.yaml != "" {
+			subCache.Unlock()
+			return e.yaml, nil // serve stale while rate-limited
+		}
+		subCache.Unlock()
+		return "", err
+	}
+	subCache.Lock()
+	subCache.m[subURL] = subEntry{yaml: yaml, expiry: time.Now().Add(5 * time.Minute)}
+	subCache.Unlock()
+	return yaml, nil
 }
 
 // decodeMaybeBase64 tries common base64 encodings; only accepts the
