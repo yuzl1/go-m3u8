@@ -2,7 +2,7 @@
 #
 # 部署步骤：
 #   1. 在主服务网页「🤖 Agent 管理」标签页查看共享 Token
-#   2. 把本文件和主服务镜像一起拷贝到 Agent 服务器
+#   2. 只拷贝这个文件到 Agent 服务器（镜像直接从 Docker Hub 拉取）
 #   3. 修改下面的 AGENT_SERVER 为主服务地址、AGENT_TOKEN 为共享 Token
 #   4. docker compose -f docker-compose.agent.yml up -d
 #
@@ -13,8 +13,8 @@
 #   - 同步完成后主服务删除本地文件以释放硬盘
 services:
   go-m3u8-agent:
-    # 主服务构建的镜像名；跨机器部署时可导出: docker save | docker load
-    image: go-m3u8-go-m3u8
+    # 与主服务同一个镜像（GitHub Actions 构建推送到 Docker Hub）
+    image: ${DOCKERHUB_USER:-yuzl1}/go-m3u8:latest
     container_name: go-m3u8-agent
     command: ["go-m3u8", "-agent"]
     environment:

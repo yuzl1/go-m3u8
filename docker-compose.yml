@@ -1,9 +1,8 @@
+# 主服务部署：直接拉取 Docker Hub 镜像（GitHub Actions 自动构建推送）
+# 如需本地构建：docker compose -f docker-compose.yml -f docker-compose.build.yml up -d
 services:
   go-m3u8:
-    build:
-      context: .
-      args:
-        NM3U8DL_VERSION: "0.6.0-beta"
+    image: ${DOCKERHUB_USER:-yuzl1}/go-m3u8:latest
     container_name: go-m3u8
     ports:
       - "5000:8080"

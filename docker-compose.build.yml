@@ -1,0 +1,8 @@
+# 本地构建覆盖文件（可选）：
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+# 日常部署直接用 Docker Hub 镜像，不需要这个文件。
+services:
+  go-m3u8:
+    build:
+      context: .
+    image: go-m3u8:local
