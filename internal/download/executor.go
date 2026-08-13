@@ -16,35 +16,36 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yuzl1/go-m3u8/internal/clash"
 	"github.com/yuzl1/go-m3u8/internal/config"
 )
 
 // Task represents a single download job.
 type Task struct {
-	ID            string            `json:"id"`
-	URL           string            `json:"url"`
-	Title         string            `json:"title"`
-	Status        string            `json:"status"` // pending, downloading, merging, done, failed, cancelled
-	Progress      string            `json:"progress"`
-	Percent       float64           `json:"percent"`
-	TotalSegments int               `json:"total_segments,omitempty"`
-	DoneSegments  int               `json:"done_segments,omitempty"`
-	OutputFile    string            `json:"output_file,omitempty"`
-	Synced        bool              `json:"synced,omitempty"`
-	SyncedTo      string            `json:"synced_to,omitempty"`
-	OriginalName  string            `json:"original_name,omitempty"` // pre-translation name
-	Translated    bool              `json:"translated,omitempty"`    // filename was translated
-	ProxyOffset   int               `json:"-"`                       // rotation start index into the clash node list
-	ClashNodes    []string          `json:"-"`                       // healthy clash nodes for this task
-	ClashGroup    string            `json:"-"`                       // clash selector group
-	ClashNode     string            `json:"clash_node,omitempty"`    // node actually used (shown in UI)
-	Error         string            `json:"error,omitempty"`
-	CreatedAt     time.Time         `json:"created_at"`
-	Headers       map[string]string `json:"headers,omitempty"`
-	BaseURL       string            `json:"base_url,omitempty"`
-	SaveDir       string            `json:"save_dir,omitempty"`
-	Log           string            `json:"-"` // full process output, not sent over websocket
+	ID            string                 `json:"id"`
+	URL           string                 `json:"url"`
+	Title         string                 `json:"title"`
+	Status        string                 `json:"status"` // pending, downloading, merging, done, failed, cancelled
+	Progress      string                 `json:"progress"`
+	Percent       float64                `json:"percent"`
+	TotalSegments int                    `json:"total_segments,omitempty"`
+	DoneSegments  int                    `json:"done_segments,omitempty"`
+	OutputFile    string                 `json:"output_file,omitempty"`
+	Synced        bool                   `json:"synced,omitempty"`
+	SyncedTo      string                 `json:"synced_to,omitempty"`
+	OriginalName  string                 `json:"original_name,omitempty"` // pre-translation name
+	Translated    bool                   `json:"translated,omitempty"`    // filename was translated
+	ProxyOffset   int                    `json:"-"`                       // rotation start index into the clash node list
+	ClashNodes    []string               `json:"-"`                       // healthy clash nodes for this task
+	ClashGroup    string                 `json:"-"`                       // clash selector group
+	ClashNode     string                 `json:"clash_node,omitempty"`    // node actually used (shown in UI)
+	ClashAcquire  func() (string, error) `json:"-"`                       // manager callback: acquire isolated clash node
+	ClashRelease  func()                 `json:"-"`                       // manager callback: release the node
+	Error         string                 `json:"error,omitempty"`
+	CreatedAt     time.Time              `json:"created_at"`
+	Headers       map[string]string      `json:"headers,omitempty"`
+	BaseURL       string                 `json:"base_url,omitempty"`
+	SaveDir       string                 `json:"save_dir,omitempty"`
+	Log           string                 `json:"-"` // full process output, not sent over websocket
 }
 
 // BuildCommand builds the N_m3u8DL-RE command-line for a task.
@@ -162,21 +163,26 @@ func Run(ctx context.Context, cfg *config.Config, task *Task, statusCh chan<- *T
 	exe := cfg.Nm3u8dlPath
 	saveDir := resolveSaveDir(cfg, task)
 
+	// Clash node: acquired ONCE for the whole task via the manager (which
+	// serializes switching) — switching mid-task would redirect the
+	// in-flight segment requests of concurrent downloads too.
+	proxy := ""
+	if task.ClashAcquire != nil && cfg.ClashProxy != "" {
+		if node, err := task.ClashAcquire(); err == nil {
+			proxy = cfg.ClashProxy
+			task.ClashNode = node
+		} else {
+			task.Log += fmt.Sprintf("clash node acquire failed: %v (continuing without proxy)\n", err)
+		}
+	}
+	defer func() {
+		if task.ClashRelease != nil {
+			task.ClashRelease()
+		}
+	}()
+
 	var lastErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		// Clash node rotation: each attempt switches to the next healthy
-		// node and routes through the local clash mixed port.
-		proxy := ""
-		if len(task.ClashNodes) > 0 && cfg.ClashProxy != "" {
-			node := task.ClashNodes[(task.ProxyOffset+attempt-1)%len(task.ClashNodes)]
-			c := clash.New(cfg.ClashAPI, cfg.ClashSecret)
-			if err := c.SelectNode(task.ClashGroup, node); err == nil {
-				proxy = cfg.ClashProxy
-				task.ClashNode = node
-			} else {
-				task.Log += fmt.Sprintf("clash node switch to %q failed: %v\n", node, err)
-			}
-		}
 		_, args := BuildCommand(cfg, task, proxy)
 
 		// NOTE: += preserves any log content written before Run (e.g. the
@@ -234,7 +240,7 @@ func Run(ctx context.Context, cfg *config.Config, task *Task, statusCh chan<- *T
 		if err == nil {
 			// Verify the file actually exists.
 			if task.OutputFile == "" {
-				task.OutputFile = findNewestFile(saveDir, task.CreatedAt)
+				task.OutputFile = findNewestFile(saveDir, task.CreatedAt, sanitizeFilename(task.Title))
 			}
 			if task.OutputFile == "" && saveDir != "" {
 				err = fmt.Errorf(
@@ -499,8 +505,10 @@ func tailLog(s string, n int) string {
 }
 
 // findNewestFile returns the newest non-directory file in dir modified
-// around the task's lifetime. Returns "" if none found.
-func findNewestFile(dir string, since time.Time) string {
+// around the task's lifetime. When namePrefix is set, only files whose
+// name starts with it are considered — concurrent downloads share the
+// save dir and must not pick each other's output. Returns "" if none.
+func findNewestFile(dir string, since time.Time, namePrefix string) string {
 	if dir == "" {
 		return ""
 	}
@@ -513,6 +521,9 @@ func findNewestFile(dir string, since time.Time) string {
 	var bestTime time.Time
 	for _, e := range entries {
 		if e.IsDir() {
+			continue
+		}
+		if namePrefix != "" && !strings.HasPrefix(e.Name(), namePrefix) {
 			continue
 		}
 		info, err := e.Info()

@@ -43,6 +43,14 @@ type Manager struct {
 	clashDelays map[string]int64 // delay test results (0 = dead)
 	clashExpiry time.Time
 
+	// Serialized node switching: clash's selector is global, so switching
+	// while another download is running would redirect its in-flight
+	// segment requests too. Concurrent downloads share one node.
+	clashRunMu    sync.Mutex
+	clashRunCount int
+	clashRunNode  string
+	clashNodeIdx  int
+
 	// Concurrency control: buffered channel as semaphore.
 	sem chan struct{}
 
@@ -335,6 +343,40 @@ func (m *Manager) clashHealthyNodes(cfg *config.Config) ([]string, string, error
 	return m.clashNodes, m.clashGroup, nil
 }
 
+// acquireClashNode hands out the clash node for a download. Node
+// switching is serialized: if another download is already using clash,
+// the current node is shared (switching mid-flight would redirect the
+// other task's segment requests too).
+func (m *Manager) acquireClashNode(cfg *config.Config, group string, nodes []string) (string, error) {
+	m.clashRunMu.Lock()
+	defer m.clashRunMu.Unlock()
+
+	if m.clashRunCount > 0 {
+		return m.clashRunNode, nil
+	}
+	if len(nodes) == 0 {
+		return "", fmt.Errorf("no healthy nodes")
+	}
+	node := nodes[m.clashNodeIdx%len(nodes)]
+	c := clash.New(cfg.ClashAPI, cfg.ClashSecret)
+	if err := c.SelectNode(group, node); err != nil {
+		return "", err
+	}
+	m.clashNodeIdx++
+	m.clashRunNode = node
+	m.clashRunCount = 1
+	return node, nil
+}
+
+// releaseClashNode marks a download as finished with the shared node.
+func (m *Manager) releaseClashNode() {
+	m.clashRunMu.Lock()
+	if m.clashRunCount > 0 {
+		m.clashRunCount--
+	}
+	m.clashRunMu.Unlock()
+}
+
 // ClashInfo returns cached clash state for the UI status display.
 func (m *Manager) ClashInfo() (group string, nodes []string, delays map[string]int64) {
 	m.clashMu.Lock()
@@ -389,7 +431,7 @@ func (m *Manager) enqueue(task *Task) {
 	cfg := m.cfgStore.Get()
 
 	// Clash: refresh the healthy node list (delay test) and hand it to
-	// the task; Run rotates nodes per attempt through the clash port.
+	// the task; Run acquires an isolated node through the manager.
 	if cfg.ClashEnabled && cfg.ClashProxy != "" {
 		nodes, group, err := m.clashHealthyNodes(cfg)
 		if err != nil {
@@ -397,6 +439,8 @@ func (m *Manager) enqueue(task *Task) {
 		} else {
 			task.ClashNodes = nodes
 			task.ClashGroup = group
+			task.ClashAcquire = func() (string, error) { return m.acquireClashNode(cfg, group, nodes) }
+			task.ClashRelease = m.releaseClashNode
 			task.Log += fmt.Sprintf("== Clash Proxy ==\ngroup: %s\nhealthy nodes: %d\n", group, len(nodes))
 		}
 	}
