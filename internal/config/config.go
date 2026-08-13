@@ -94,7 +94,7 @@ func DefaultConfig() *Config {
 		AgentEnabled:       true,
 		SyncAfterDownload:  true,
 		DeleteAfterSync:    true,
-		SyncConnections:    4,
+		SyncConnections:    8,
 		FilenameSource:     "auto",
 		TranslateEnabled:   false,
 		TranslateTarget:    "zh-CN",
