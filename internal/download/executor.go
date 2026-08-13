@@ -21,26 +21,27 @@ import (
 
 // Task represents a single download job.
 type Task struct {
-	ID            string            `json:"id"`
-	URL           string            `json:"url"`
-	Title         string            `json:"title"`
-	Status        string            `json:"status"` // pending, downloading, merging, done, failed, cancelled
-	Progress      string            `json:"progress"`
-	Percent       float64           `json:"percent"`
-	TotalSegments int               `json:"total_segments,omitempty"`
-	DoneSegments  int               `json:"done_segments,omitempty"`
-	OutputFile    string            `json:"output_file,omitempty"`
-	Synced        bool              `json:"synced,omitempty"`
-	SyncedTo      string            `json:"synced_to,omitempty"`
-	OriginalName  string            `json:"original_name,omitempty"` // pre-translation name
-	Translated    bool              `json:"translated,omitempty"`    // filename was translated
-	ProxyOffset   int               `json:"-"`                       // rotation start index into the proxy pool
-	Error         string            `json:"error,omitempty"`
-	CreatedAt     time.Time         `json:"created_at"`
-	Headers       map[string]string `json:"headers,omitempty"`
-	BaseURL       string            `json:"base_url,omitempty"`
-	SaveDir       string            `json:"save_dir,omitempty"`
-	Log           string            `json:"-"` // full process output, not sent over websocket
+	ID             string            `json:"id"`
+	URL            string            `json:"url"`
+	Title          string            `json:"title"`
+	Status         string            `json:"status"` // pending, downloading, merging, done, failed, cancelled
+	Progress       string            `json:"progress"`
+	Percent        float64           `json:"percent"`
+	TotalSegments  int               `json:"total_segments,omitempty"`
+	DoneSegments   int               `json:"done_segments,omitempty"`
+	OutputFile     string            `json:"output_file,omitempty"`
+	Synced         bool              `json:"synced,omitempty"`
+	SyncedTo       string            `json:"synced_to,omitempty"`
+	OriginalName   string            `json:"original_name,omitempty"` // pre-translation name
+	Translated     bool              `json:"translated,omitempty"`    // filename was translated
+	ProxyOffset    int               `json:"-"`                       // rotation start index into the proxy pool
+	DynamicProxies []string          `json:"-"`                       // fetched from the proxy API for this task
+	Error          string            `json:"error,omitempty"`
+	CreatedAt      time.Time         `json:"created_at"`
+	Headers        map[string]string `json:"headers,omitempty"`
+	BaseURL        string            `json:"base_url,omitempty"`
+	SaveDir        string            `json:"save_dir,omitempty"`
+	Log            string            `json:"-"` // full process output, not sent over websocket
 }
 
 // BuildCommand builds the N_m3u8DL-RE command-line for a task.
@@ -156,7 +157,8 @@ const maxLogBytes = 64 * 1024
 func Run(ctx context.Context, cfg *config.Config, task *Task, statusCh chan<- *Task) error {
 	exe := cfg.Nm3u8dlPath
 	saveDir := resolveSaveDir(cfg, task)
-	proxies := cfg.ProxyList
+	// Pool = dynamic (API-fetched, fresh) + static (user-configured).
+	proxies := append(append([]string{}, task.DynamicProxies...), cfg.ProxyList...)
 
 	var lastErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {

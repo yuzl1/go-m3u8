@@ -35,6 +35,9 @@ type Manager struct {
 	// proxyCounter round-robins the proxy pool across tasks.
 	proxyCounter atomic.Uint32
 
+	// proxyFetcher caches proxies fetched from the dynamic proxy API.
+	proxyFetcher *proxyFetcher
+
 	// Concurrency control: buffered channel as semaphore.
 	sem chan struct{}
 
@@ -48,11 +51,12 @@ type Manager struct {
 // tasksFile (JSON) so downloads survive server/container restarts.
 func NewManager(cfgStore *config.Store, tasksFile string) *Manager {
 	m := &Manager{
-		tasks:     make(map[string]*Task),
-		broadcast: make(chan *Task, 64),
-		subs:      make(map[chan *Task]struct{}),
-		cfgStore:  cfgStore,
-		tasksFile: tasksFile,
+		tasks:        make(map[string]*Task),
+		broadcast:    make(chan *Task, 64),
+		subs:         make(map[chan *Task]struct{}),
+		cfgStore:     cfgStore,
+		tasksFile:    tasksFile,
+		proxyFetcher: newProxyFetcher(),
 	}
 	// Default max concurrent = 3; tightened by config.
 	m.sem = make(chan struct{}, 3)
@@ -312,6 +316,16 @@ func translateFilename(text string, cfg *config.Config) (string, error) {
 // enqueue blocks on the semaphore, then runs the download.
 func (m *Manager) enqueue(task *Task) {
 	cfg := m.cfgStore.Get()
+
+	// Fetch fresh proxies from the dynamic API (cached, non-blocking).
+	if cfg.ProxyAPIURL != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		task.DynamicProxies = m.proxyFetcher.Get(ctx, cfg.ProxyAPIURL, cfg.ProxyAPICount)
+		cancel()
+		if len(task.DynamicProxies) > 0 {
+			task.Log += fmt.Sprintf("== Proxy Pool ==\nfetched %d proxies from API (validated)\n\n", len(task.DynamicProxies))
+		}
+	}
 
 	// Filename translation happens HERE, in the pipeline — not in the HTTP
 	// handler — so a slow or failing translation service never delays task

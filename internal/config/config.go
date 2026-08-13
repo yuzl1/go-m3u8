@@ -37,6 +37,11 @@ type Config struct {
 	// One proxy per line, e.g. http://ip:port or http://user:pass@ip:port
 	ProxyList []string `json:"proxy_list"`
 
+	// Dynamic proxy source: fetch fresh proxies from an API per task,
+	// e.g. https://proxy.scdn.io/api/get_proxy.php?protocol=http&count=5
+	ProxyAPIURL   string `json:"proxy_api_url"`
+	ProxyAPICount int    `json:"proxy_api_count"` // 1-20, default 5
+
 	// Filename handling: which cat-catch field becomes the saved name,
 	// and optional translation of the filename (e.g. English -> Chinese).
 	FilenameSource    string `json:"filename_source"`    // auto | title | fullFileName
