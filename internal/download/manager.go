@@ -200,14 +200,17 @@ func (m *Manager) Retry(id string) (*Task, error) {
 }
 
 // Delete removes a task from history.
+// NOTE: saveTasks takes the read lock, so it must be called AFTER
+// releasing the write lock — otherwise this deadlocks.
 func (m *Manager) Delete(id string) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	task, ok := m.tasks[id]
 	if !ok {
+		m.mu.Unlock()
 		return fmt.Errorf("task not found: %s", id)
 	}
 	if task.Status == "downloading" {
+		m.mu.Unlock()
 		return fmt.Errorf("cannot delete a running task")
 	}
 	delete(m.tasks, id)
@@ -217,6 +220,8 @@ func (m *Manager) Delete(id string) error {
 			break
 		}
 	}
+	m.mu.Unlock()
+
 	m.saveTasks()
 	return nil
 }

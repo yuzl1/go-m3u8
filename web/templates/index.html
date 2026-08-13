@@ -639,8 +639,22 @@ function statusText(s) {
   return map[s] || s;
 }
 
-async function cancelTask(id) { await fetch('/api/tasks/' + id, {method:'DELETE'}); }
-async function deleteTask(id) { await fetch('/api/tasks/' + id + '?action=delete', {method:'DELETE'}); }
+async function cancelTask(id) {
+  const res = await fetch('/api/tasks/' + id, {method:'DELETE'});
+  if (res.ok) loadInitialTasks();
+}
+async function deleteTask(id) {
+  const res = await fetch('/api/tasks/' + id + '?action=delete', {method:'DELETE'});
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    alert('删除失败: ' + (err && err.error || res.status));
+    return;
+  }
+  // Remove immediately and re-sync with server
+  tasks = tasks.filter(t => t.id !== id);
+  renderTasks();
+  loadInitialTasks();
+}
 async function retryTask(id) { await fetch('/api/tasks/' + id + '/retry', {method:'POST'}); }
 
 async function showTaskLog(id) {
