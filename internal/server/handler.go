@@ -36,6 +36,40 @@ func (h *Handler) ListTransfers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.AgentHub.Transfers())
 }
 
+// TransferAction handles POST /api/transfers/sync-file (manual re-sync of
+// a save-dir file) and POST /api/transfers/{id}/retry (re-queue failed).
+func (h *Handler) TransferAction(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/transfers/"), "/")
+
+	if path == "sync-file" {
+		var body struct {
+			File string `json:"file"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.File == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "file name required"})
+			return
+		}
+		t, err := h.AgentHub.SyncFile(body.File)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, t)
+		return
+	}
+
+	if id, ok := strings.CutSuffix(path, "/retry"); ok {
+		if err := h.AgentHub.RetryTransfer(id); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "retrying"})
+		return
+	}
+
+	writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown transfer action"})
+}
+
 // Index serves the main web page.
 func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

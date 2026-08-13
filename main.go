@@ -71,7 +71,12 @@ func main() {
 	mgr := download.NewManager(store, tasksFile)
 
 	// Agent hub: agents dial in, transfers created after downloads finish.
-	hub := agent.NewHub(store, mgr)
+	// Transfer history is persisted so sync jobs survive restarts.
+	transfersFile := ""
+	if configDir != "" {
+		transfersFile = filepath.Join(configDir, "transfers.json")
+	}
+	hub := agent.NewHub(store, mgr, transfersFile)
 	mgr.SetOnTaskDone(hub.OnDownloadDone)
 
 	// Create WebSocket handler.

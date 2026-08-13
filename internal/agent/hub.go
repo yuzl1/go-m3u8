@@ -3,6 +3,7 @@ package agent
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -27,27 +28,149 @@ const maxAttempts = 3
 // assignments over the WebSocket control channel, and pull file bytes
 // via HTTP GET /agent/files/{id}.
 type Hub struct {
-	mu         sync.RWMutex
-	agents     map[string]*Agent
-	agentConns map[string]*websocket.Conn
-	transfers  map[string]*Transfer
-	order      []string // transfer insertion order
+	mu            sync.RWMutex
+	agents        map[string]*Agent
+	agentConns    map[string]*websocket.Conn
+	transfers     map[string]*Transfer
+	order         []string // transfer insertion order
+	transfersFile string   // persisted transfer history, "" disables persistence
 
 	cfgStore *config.Store
 	manager  *download.Manager
 }
 
 // NewHub creates the agent hub and ensures a shared token exists.
-func NewHub(cfgStore *config.Store, mgr *download.Manager) *Hub {
+// Transfer history is persisted to transfersFile so sync jobs survive
+// restarts and are re-queued automatically.
+func NewHub(cfgStore *config.Store, mgr *download.Manager, transfersFile string) *Hub {
 	h := &Hub{
-		agents:     make(map[string]*Agent),
-		agentConns: make(map[string]*websocket.Conn),
-		transfers:  make(map[string]*Transfer),
-		cfgStore:   cfgStore,
-		manager:    mgr,
+		agents:        make(map[string]*Agent),
+		agentConns:    make(map[string]*websocket.Conn),
+		transfers:     make(map[string]*Transfer),
+		transfersFile: transfersFile,
+		cfgStore:      cfgStore,
+		manager:       mgr,
 	}
 	h.ensureToken()
+	h.loadTransfers()
+	// Periodic snapshot so in-progress byte counts survive restarts.
+	go func() {
+		for range time.NewTicker(30 * time.Second).C {
+			h.saveTransfers()
+		}
+	}()
+	// Re-queue restored transfers once agents connect (or immediately if
+	// one is already online).
+	go func() {
+		time.Sleep(2 * time.Second)
+		h.drainQueue()
+	}()
 	return h
+}
+
+// loadTransfers restores transfer history from disk. Interrupted
+// transfers go back to "waiting" so they auto-retry on the next agent
+// connection; FilePath is reconstructed from the save dir.
+func (h *Hub) loadTransfers() {
+	if h.transfersFile == "" {
+		return
+	}
+	data, err := os.ReadFile(h.transfersFile)
+	if err != nil {
+		return
+	}
+	var ts []*Transfer
+	if err := json.Unmarshal(data, &ts); err != nil {
+		log.Printf("Failed to load transfer history: %v", err)
+		return
+	}
+	saveDir := h.cfgStore.Get().SaveDir
+	for _, t := range ts {
+		if t == nil || t.ID == "" {
+			continue
+		}
+		if t.FilePath == "" {
+			t.FilePath = filepath.Join(saveDir, t.FileName)
+		}
+		if t.Status == "transferring" || t.Status == "waiting" {
+			t.Status = "waiting"
+			t.Error = "服务重启，等待重新传输"
+		}
+		h.transfers[t.ID] = t
+		h.order = append(h.order, t.ID)
+	}
+	log.Printf("Restored %d transfers from history", len(ts))
+}
+
+// saveTransfers persists the current transfer list to disk.
+func (h *Hub) saveTransfers() {
+	if h.transfersFile == "" {
+		return
+	}
+	h.mu.RLock()
+	data, err := json.Marshal(h.Transfers())
+	h.mu.RUnlock()
+	if err != nil {
+		return
+	}
+	if err := os.WriteFile(h.transfersFile, data, 0644); err != nil {
+		log.Printf("Failed to persist transfers: %v", err)
+	}
+}
+
+// SyncFile creates a manual transfer for a file in the save directory —
+// used by the "传输" button in the UI to re-sync failed or missing files.
+func (h *Hub) SyncFile(fileName string) (*Transfer, error) {
+	name := filepath.Base(fileName) // no path traversal
+	if name == "." || name == "/" {
+		return nil, fmt.Errorf("invalid file name")
+	}
+	cfg := h.cfgStore.Get()
+	path := filepath.Join(cfg.SaveDir, name)
+	st, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("file not found: %s", name)
+	}
+	t := &Transfer{
+		ID:        newID(),
+		FileName:  name,
+		FilePath:  path,
+		Size:      st.Size(),
+		Status:    "waiting",
+		CreatedAt: time.Now(),
+	}
+	h.mu.Lock()
+	h.transfers[t.ID] = t
+	h.order = append(h.order, t.ID)
+	h.mu.Unlock()
+	h.saveTransfers()
+	log.Printf("Manual transfer created for %s (%d bytes)", name, st.Size())
+	h.assign(t)
+	return t, nil
+}
+
+// RetryTransfer re-queues a failed transfer.
+func (h *Hub) RetryTransfer(id string) error {
+	h.mu.Lock()
+	t := h.transfers[id]
+	h.mu.Unlock()
+	if t == nil {
+		return fmt.Errorf("transfer not found")
+	}
+	if t.Status == "transferring" {
+		return fmt.Errorf("transfer already in progress")
+	}
+	if _, err := os.Stat(t.FilePath); err != nil {
+		t.Status = "failed"
+		t.Error = "file missing on server: " + err.Error()
+		h.saveTransfers()
+		return fmt.Errorf("file missing on server: %v", err)
+	}
+	t.Status = "waiting"
+	t.Error = ""
+	h.saveTransfers()
+	go h.assign(t)
+	return nil
 }
 
 // ensureToken generates and persists a random agent token on first use.
@@ -91,6 +214,7 @@ func (h *Hub) OnDownloadDone(task *download.Task) {
 	h.transfers[t.ID] = t
 	h.order = append(h.order, t.ID)
 	h.mu.Unlock()
+	h.saveTransfers()
 	log.Printf("Transfer created: %s (%s, %d bytes) from task %s", t.ID, t.FileName, t.Size, t.TaskID)
 
 	h.assign(t)
@@ -307,6 +431,7 @@ func (h *Hub) onTransferDone(a *Agent, transferID string) {
 	}
 
 	h.clearActive(a)
+	h.saveTransfers()
 	h.drainQueue()
 }
 
@@ -322,10 +447,12 @@ func (h *Hub) onTransferFailed(a *Agent, transferID, errMsg string) {
 
 	if t.Attempts >= maxAttempts {
 		t.Status = "failed"
+		h.saveTransfers()
 		log.Printf("Transfer %s failed permanently after %d attempts: %s", t.ID, t.Attempts, errMsg)
 		return
 	}
 	t.Status = "waiting"
+	h.saveTransfers()
 	log.Printf("Transfer %s failed (attempt %d): %s — will retry", t.ID, t.Attempts, errMsg)
 	h.drainQueue()
 }
