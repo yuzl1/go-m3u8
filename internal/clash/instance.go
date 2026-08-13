@@ -2,7 +2,6 @@ package clash
 
 import (
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -94,7 +93,8 @@ func BuildInstanceConfig(nodeName, nodeBlock string, port int) string {
 	fmt.Fprintf(&b, "mixed-port: %d\n", port)
 	b.WriteString("allow-lan: false\n")
 	b.WriteString("mode: rule\n")
-	b.WriteString("log-level: error\n")
+	b.WriteString("log-level: warning\n")
+	b.WriteString("geo-auto-update: false\n") // no geo DB download at startup
 	b.WriteString("proxies:\n")
 	lines := strings.Split(nodeBlock, "\n")
 	for i, line := range lines {
@@ -120,8 +120,9 @@ func BuildInstanceConfig(nodeName, nodeBlock string, port int) string {
 // Instance wraps a running per-task mihomo process plus its temp dir so
 // callers can clean up both.
 type Instance struct {
-	Cmd *exec.Cmd
-	Dir string // temp dir holding the generated config (remove on stop)
+	Cmd  *exec.Cmd
+	Dir  string     // temp dir holding the generated config (remove on stop)
+	done chan error // filled when the process exits
 }
 
 // Stop kills the process and removes its temp dir.
@@ -131,7 +132,7 @@ func (i *Instance) Stop() {
 	}
 	if i.Cmd != nil && i.Cmd.Process != nil {
 		i.Cmd.Process.Kill()
-		i.Cmd.Wait()
+		<-i.done // reap
 	}
 	if i.Dir != "" {
 		os.RemoveAll(i.Dir)
@@ -154,24 +155,52 @@ func StartInstance(nodeName, nodeBlock string, port int) (*Instance, error) {
 	if err := os.WriteFile(cfgPath, []byte(BuildInstanceConfig(nodeName, nodeBlock, port)), 0644); err != nil {
 		return nil, err
 	}
+	logPath := filepath.Join(dir, "mihomo.log")
+	logF, err := os.Create(logPath)
+	if err != nil {
+		return nil, err
+	}
 	cmd := exec.Command(bin, "-d", dir, "-f", cfgPath)
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+	cmd.Stdout = logF
+	cmd.Stderr = logF
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
 
-	// Wait until the proxy port accepts connections.
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	// Wait until the proxy port accepts connections (or the process dies).
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		select {
+		case werr := <-done:
+			logTail := readLogTail(logPath)
+			return nil, fmt.Errorf("mihomo exited during startup: %v\n%s", werr, logTail)
+		default:
+		}
 		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 200*time.Millisecond)
 		if err == nil {
 			conn.Close()
-			return &Instance{Cmd: cmd, Dir: dir}, nil
+			return &Instance{Cmd: cmd, Dir: dir, done: done}, nil
+		}
+		if time.Now().After(deadline) {
+			cmd.Process.Kill()
+			<-done
+			logTail := readLogTail(logPath)
+			return nil, fmt.Errorf("mihomo instance on port %d did not start in time\n%s", port, logTail)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	cmd.Process.Kill()
-	os.RemoveAll(dir)
-	return nil, fmt.Errorf("mihomo instance on port %d did not start in time", port)
+}
+
+// readLogTail returns the last ~2KB of a log file.
+func readLogTail(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	if len(data) > 2048 {
+		data = data[len(data)-2048:]
+	}
+	return strings.TrimSpace(string(data))
 }

@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/yuzl1/go-m3u8/internal/clash"
 	"github.com/yuzl1/go-m3u8/internal/config"
 )
 
@@ -174,8 +175,22 @@ func Run(ctx context.Context, cfg *config.Config, task *Task, statusCh chan<- *T
 			task.ClashNode = s.Node
 		} else {
 			task.Log += fmt.Sprintf("clash instance failed: %v — falling back to shared clash proxy\n", err)
+			// Switch the sidecar to a HEALTHY node first — the shared
+			// proxy's current selection may be dead (SSL errors etc.).
+			if len(task.ClashNodes) > 0 {
+				c := clash.New(cfg.ClashAPI, cfg.ClashSecret)
+				node := task.ClashNodes[task.ProxyOffset%len(task.ClashNodes)]
+				if serr := c.SelectNode(task.ClashGroup, node); serr == nil {
+					task.Log += fmt.Sprintf("switched shared proxy to healthy node %q\n", node)
+					task.ClashNode = "共享:" + node
+				} else {
+					task.Log += fmt.Sprintf("shared proxy switch failed: %v\n", serr)
+					task.ClashNode = "共享代理(回退)"
+				}
+			} else {
+				task.ClashNode = "共享代理(回退)"
+			}
 			proxy = cfg.ClashProxy
-			task.ClashNode = "共享代理(回退)"
 		}
 	}
 	defer func() {
