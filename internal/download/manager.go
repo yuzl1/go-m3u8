@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/yuzl1/go-m3u8/internal/clash"
 	"github.com/yuzl1/go-m3u8/internal/config"
 	"github.com/yuzl1/go-m3u8/internal/translate"
 )
@@ -32,11 +33,15 @@ type Manager struct {
 	// onTaskDone is invoked after a download completes successfully.
 	onTaskDone func(*Task)
 
-	// proxyCounter round-robins the proxy pool across tasks.
+	// proxyCounter round-robins the clash node list across tasks.
 	proxyCounter atomic.Uint32
 
-	// proxyFetcher caches proxies fetched from the dynamic proxy API.
-	proxyFetcher *proxyFetcher
+	// clash node rotation cache (healthy nodes only, via delay test).
+	clashMu     sync.Mutex
+	clashGroup  string
+	clashNodes  []string         // healthy node names, rotation order
+	clashDelays map[string]int64 // delay test results (0 = dead)
+	clashExpiry time.Time
 
 	// Concurrency control: buffered channel as semaphore.
 	sem chan struct{}
@@ -51,12 +56,11 @@ type Manager struct {
 // tasksFile (JSON) so downloads survive server/container restarts.
 func NewManager(cfgStore *config.Store, tasksFile string) *Manager {
 	m := &Manager{
-		tasks:        make(map[string]*Task),
-		broadcast:    make(chan *Task, 64),
-		subs:         make(map[chan *Task]struct{}),
-		cfgStore:     cfgStore,
-		tasksFile:    tasksFile,
-		proxyFetcher: newProxyFetcher(),
+		tasks:     make(map[string]*Task),
+		broadcast: make(chan *Task, 64),
+		subs:      make(map[chan *Task]struct{}),
+		cfgStore:  cfgStore,
+		tasksFile: tasksFile,
 	}
 	// Default max concurrent = 3; tightened by config.
 	m.sem = make(chan struct{}, 3)
@@ -291,6 +295,73 @@ func (m *Manager) dispatch() {
 	}
 }
 
+// clashHealthyNodes returns the group's node list filtered by mihomo's
+// built-in delay test (dead nodes excluded). Results are cached briefly.
+func (m *Manager) clashHealthyNodes(cfg *config.Config) ([]string, string, error) {
+	c := clash.New(cfg.ClashAPI, cfg.ClashSecret)
+
+	m.clashMu.Lock()
+	defer m.clashMu.Unlock()
+
+	if time.Now().Before(m.clashExpiry) {
+		return m.clashNodes, m.clashGroup, nil
+	}
+
+	group, nodes, err := c.SelectorNodes(cfg.ClashGroup)
+	if err != nil {
+		return nil, "", err
+	}
+	// Built-in delay test: dead nodes report 0 / are absent.
+	delays, derr := c.TestGroupDelay(group, "", 5000)
+	if derr != nil {
+		// Delay test unavailable — fall back to all nodes.
+		delays = map[string]int64{}
+	}
+	healthy := make([]string, 0, len(nodes))
+	for _, n := range nodes {
+		if d, ok := delays[n]; ok && d > 0 {
+			healthy = append(healthy, n)
+		}
+	}
+	if len(healthy) == 0 {
+		// Nothing passed the test; keep all nodes rather than failing
+		// (the test itself may have been blocked).
+		healthy = nodes
+	}
+	m.clashGroup = group
+	m.clashNodes = healthy
+	m.clashDelays = delays
+	m.clashExpiry = time.Now().Add(5 * time.Minute)
+	return m.clashNodes, m.clashGroup, nil
+}
+
+// ClashInfo returns cached clash state for the UI status display.
+func (m *Manager) ClashInfo() (group string, nodes []string, delays map[string]int64) {
+	m.clashMu.Lock()
+	defer m.clashMu.Unlock()
+	return m.clashGroup, append([]string{}, m.clashNodes...), m.clashDelays
+}
+
+// ClashHealthy returns the group name, healthy node list and delay test
+// results, refreshing the cache when needed.
+func (m *Manager) ClashHealthy(cfg *config.Config) (string, []string, map[string]int64, error) {
+	nodes, group, err := m.clashHealthyNodes(cfg)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	m.clashMu.Lock()
+	delays := m.clashDelays
+	m.clashMu.Unlock()
+	return group, nodes, delays, nil
+}
+
+// InvalidateClashCache forces a fresh node health check on next use.
+func (m *Manager) InvalidateClashCache() {
+	m.clashMu.Lock()
+	m.clashExpiry = time.Time{}
+	m.clashMu.Unlock()
+}
+
 // translateFilename translates a task filename per config, with a
 // generous timeout and retries.
 func translateFilename(text string, cfg *config.Config) (string, error) {
@@ -317,13 +388,16 @@ func translateFilename(text string, cfg *config.Config) (string, error) {
 func (m *Manager) enqueue(task *Task) {
 	cfg := m.cfgStore.Get()
 
-	// Fetch fresh proxies from the dynamic API (cached, non-blocking).
-	if cfg.ProxyAPIURL != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		task.DynamicProxies = m.proxyFetcher.Get(ctx, cfg.ProxyAPIURL, cfg.ProxyAPICount)
-		cancel()
-		if len(task.DynamicProxies) > 0 {
-			task.Log += fmt.Sprintf("== Proxy Pool ==\nfetched %d proxies from API (validated)\n\n", len(task.DynamicProxies))
+	// Clash: refresh the healthy node list (delay test) and hand it to
+	// the task; Run rotates nodes per attempt through the clash port.
+	if cfg.ClashEnabled && cfg.ClashProxy != "" {
+		nodes, group, err := m.clashHealthyNodes(cfg)
+		if err != nil {
+			task.Log += fmt.Sprintf("== Clash Proxy ==\nFAILED: %v (continuing without proxy)\n\n", err)
+		} else {
+			task.ClashNodes = nodes
+			task.ClashGroup = group
+			task.Log += fmt.Sprintf("== Clash Proxy ==\ngroup: %s\nhealthy nodes: %d\n", group, len(nodes))
 		}
 	}
 

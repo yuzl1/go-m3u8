@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/yuzl1/go-m3u8/internal/agent"
+	"github.com/yuzl1/go-m3u8/internal/clash"
 	"github.com/yuzl1/go-m3u8/internal/config"
 	"github.com/yuzl1/go-m3u8/internal/download"
 	"github.com/yuzl1/go-m3u8/internal/translate"
@@ -76,12 +77,59 @@ func (h *Handler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
 	if cfg.AgentToken == "" {
 		cfg.AgentToken = h.Config.Get().AgentToken
 	}
+
+	// Clash: extract the API secret from the imported yaml and push the
+	// config to the mihomo sidecar (async — don't block the save).
+	if cfg.ClashEnabled && cfg.ClashYAML != "" {
+		if secret := clash.ExtractSecret(cfg.ClashYAML); secret != "" {
+			cfg.ClashSecret = secret
+		}
+		go func(cfgCopy config.Config) {
+			c := clash.New(cfgCopy.ClashAPI, cfgCopy.ClashSecret)
+			if err := c.UploadConfig(clash.SanitizePayload(cfgCopy.ClashYAML)); err != nil {
+				log.Printf("Failed to push clash config: %v", err)
+			} else {
+				log.Printf("Clash config pushed to %s", cfgCopy.ClashAPI)
+			}
+		}(cfg)
+	}
+
 	if err := h.Config.Update(&cfg); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	h.Manager.RefreshSem()
 	writeJSON(w, http.StatusOK, cfg)
+}
+
+// ClashStatus reports clash connectivity, the rotation group, the
+// currently selected node, and the health of every node (delay test).
+func (h *Handler) ClashStatus(w http.ResponseWriter, r *http.Request) {
+	cfg := h.Config.Get()
+	if !cfg.ClashEnabled {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "clash 未启用"})
+		return
+	}
+
+	// force = re-run the node health check now
+	if r.URL.Query().Get("refresh") == "1" {
+		h.Manager.InvalidateClashCache()
+	}
+
+	c := clash.New(cfg.ClashAPI, cfg.ClashSecret)
+	group, nodes, delays, err := h.Manager.ClashHealthy(cfg)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	current, _ := c.CurrentNode(group)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"group":   group,
+		"current": current,
+		"nodes":   nodes,
+		"delays":  delays,
+	})
 }
 
 // downloadReq is the /api/download request payload. JSON field names match

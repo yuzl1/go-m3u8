@@ -1,0 +1,12 @@
+# mihomo 启动引导配置（最小可用）
+# 实际配置由主服务页面保存时通过 API 推送到 clash 内核，
+# 此文件仅用于容器启动。
+mixed-port: 7890
+external-controller: 0.0.0.0:9090
+allow-lan: true
+mode: rule
+log-level: warning
+proxies: []
+proxy-groups: []
+rules:
+  - MATCH,DIRECT

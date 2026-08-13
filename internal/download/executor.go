@@ -16,32 +16,35 @@ import (
 	"sync"
 	"time"
 
+	"github.com/yuzl1/go-m3u8/internal/clash"
 	"github.com/yuzl1/go-m3u8/internal/config"
 )
 
 // Task represents a single download job.
 type Task struct {
-	ID             string            `json:"id"`
-	URL            string            `json:"url"`
-	Title          string            `json:"title"`
-	Status         string            `json:"status"` // pending, downloading, merging, done, failed, cancelled
-	Progress       string            `json:"progress"`
-	Percent        float64           `json:"percent"`
-	TotalSegments  int               `json:"total_segments,omitempty"`
-	DoneSegments   int               `json:"done_segments,omitempty"`
-	OutputFile     string            `json:"output_file,omitempty"`
-	Synced         bool              `json:"synced,omitempty"`
-	SyncedTo       string            `json:"synced_to,omitempty"`
-	OriginalName   string            `json:"original_name,omitempty"` // pre-translation name
-	Translated     bool              `json:"translated,omitempty"`    // filename was translated
-	ProxyOffset    int               `json:"-"`                       // rotation start index into the proxy pool
-	DynamicProxies []string          `json:"-"`                       // fetched from the proxy API for this task
-	Error          string            `json:"error,omitempty"`
-	CreatedAt      time.Time         `json:"created_at"`
-	Headers        map[string]string `json:"headers,omitempty"`
-	BaseURL        string            `json:"base_url,omitempty"`
-	SaveDir        string            `json:"save_dir,omitempty"`
-	Log            string            `json:"-"` // full process output, not sent over websocket
+	ID            string            `json:"id"`
+	URL           string            `json:"url"`
+	Title         string            `json:"title"`
+	Status        string            `json:"status"` // pending, downloading, merging, done, failed, cancelled
+	Progress      string            `json:"progress"`
+	Percent       float64           `json:"percent"`
+	TotalSegments int               `json:"total_segments,omitempty"`
+	DoneSegments  int               `json:"done_segments,omitempty"`
+	OutputFile    string            `json:"output_file,omitempty"`
+	Synced        bool              `json:"synced,omitempty"`
+	SyncedTo      string            `json:"synced_to,omitempty"`
+	OriginalName  string            `json:"original_name,omitempty"` // pre-translation name
+	Translated    bool              `json:"translated,omitempty"`    // filename was translated
+	ProxyOffset   int               `json:"-"`                       // rotation start index into the clash node list
+	ClashNodes    []string          `json:"-"`                       // healthy clash nodes for this task
+	ClashGroup    string            `json:"-"`                       // clash selector group
+	ClashNode     string            `json:"clash_node,omitempty"`    // node actually used (shown in UI)
+	Error         string            `json:"error,omitempty"`
+	CreatedAt     time.Time         `json:"created_at"`
+	Headers       map[string]string `json:"headers,omitempty"`
+	BaseURL       string            `json:"base_url,omitempty"`
+	SaveDir       string            `json:"save_dir,omitempty"`
+	Log           string            `json:"-"` // full process output, not sent over websocket
 }
 
 // BuildCommand builds the N_m3u8DL-RE command-line for a task.
@@ -158,15 +161,21 @@ const maxLogBytes = 64 * 1024
 func Run(ctx context.Context, cfg *config.Config, task *Task, statusCh chan<- *Task) error {
 	exe := cfg.Nm3u8dlPath
 	saveDir := resolveSaveDir(cfg, task)
-	// Pool = dynamic (API-fetched, fresh) + static (user-configured).
-	proxies := append(append([]string{}, task.DynamicProxies...), cfg.ProxyList...)
 
 	var lastErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		// Rotate proxy per attempt so retries don't hammer the same IP.
+		// Clash node rotation: each attempt switches to the next healthy
+		// node and routes through the local clash mixed port.
 		proxy := ""
-		if len(proxies) > 0 {
-			proxy = proxies[(task.ProxyOffset+attempt-1)%len(proxies)]
+		if len(task.ClashNodes) > 0 && cfg.ClashProxy != "" {
+			node := task.ClashNodes[(task.ProxyOffset+attempt-1)%len(task.ClashNodes)]
+			c := clash.New(cfg.ClashAPI, cfg.ClashSecret)
+			if err := c.SelectNode(task.ClashGroup, node); err == nil {
+				proxy = cfg.ClashProxy
+				task.ClashNode = node
+			} else {
+				task.Log += fmt.Sprintf("clash node switch to %q failed: %v\n", node, err)
+			}
 		}
 		_, args := BuildCommand(cfg, task, proxy)
 
@@ -206,6 +215,15 @@ func Run(ctx context.Context, cfg *config.Config, task *Task, statusCh chan<- *T
 		// check failure) — detect them from the log.
 		if err == nil && checkLogForFailure(task.Log) {
 			err = fmt.Errorf("N_m3u8DL-RE logged fatal errors but exited 0:\n%s", tailLog(task.Log, 4000))
+		}
+
+		// Teaser-playlist guard: sites serve suspicious IPs (datacenter
+		// proxies) a short preview playlist. A real episode is never
+		// just a handful of segments.
+		if err == nil && cfg.MinSegments > 0 && task.TotalSegments > 0 && task.TotalSegments < cfg.MinSegments {
+			err = fmt.Errorf(
+				"播放列表仅 %d 个分片（配置要求至少 %d）——疑似预览/无效播放列表（IP 被网站识别或代理内容被替换）\n\nFull log:\n%s",
+				task.TotalSegments, cfg.MinSegments, tailLog(task.Log, 4000))
 		}
 
 		if err == nil {
@@ -253,10 +271,12 @@ var (
 	totalSegRe  = regexp.MustCompile(`(?i)(?:total\s+segments?|分片总数|total)[^\d]{0,20}(\d+)`)
 	ansiRe      = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
 	outFileRe   = regexp.MustCompile(`(?i)(?:muxing\s+to|output(?: file)?[^:]*:|muxed\s+to|saving\s+to)\s+(.+)`)
+	// segDeclRe matches playlist declarations like "Vid Kbps | 734 Segments | ~02h02m20s".
+	segDeclRe = regexp.MustCompile(`(?i)(\d+)\s*segments`)
 	// failureRe matches fatal errors in N_m3u8DL-RE output. It logs
 	// "ERROR: Failed" on segment-count-check failure but still exits 0,
 	// so we must detect failure from the log, not just the exit code.
-	failureRe = regexp.MustCompile(`(?i)(segment count check not pass|check segments count not pass|^.*ERROR:\s*failed|fatal error)`)
+	failureRe = regexp.MustCompile(`(?i)(segment count check not pass|check segments count not pass|^.*ERROR:\s*failed|fatal error|invalid data found|error opening input)`)
 )
 
 // checkLogForFailure reports whether the captured output contains a fatal
@@ -439,8 +459,14 @@ func updateTaskProgress(task *Task, line string) {
 		}
 	}
 
-	// Total segments declaration, e.g. "Total segments: 123"
+	// Total segments declaration, e.g. "Total segments: 123" or
+	// "Vid Kbps | 734 Segments | ~02h02m20s"
 	if m := totalSegRe.FindStringSubmatch(line); m != nil {
+		if n, err := strconv.Atoi(m[1]); err == nil && n > task.TotalSegments {
+			task.TotalSegments = n
+		}
+	}
+	if m := segDeclRe.FindStringSubmatch(line); m != nil {
 		if n, err := strconv.Atoi(m[1]); err == nil && n > task.TotalSegments {
 			task.TotalSegments = n
 		}

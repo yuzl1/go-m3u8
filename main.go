@@ -7,8 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/yuzl1/go-m3u8/internal/agent"
+	"github.com/yuzl1/go-m3u8/internal/clash"
 	"github.com/yuzl1/go-m3u8/internal/config"
 	"github.com/yuzl1/go-m3u8/internal/download"
 	"github.com/yuzl1/go-m3u8/internal/server"
@@ -74,6 +76,26 @@ func main() {
 
 	// Create and start server.
 	srv := server.New(store, mgr, wsHandler, hub, tmpl)
+
+	// Push the stored clash config on startup (the mihomo sidecar starts
+	// empty and needs the user's config after every restart).
+	go func() {
+		cfg := store.Get()
+		if !cfg.ClashEnabled || cfg.ClashYAML == "" {
+			return
+		}
+		c := clash.New(cfg.ClashAPI, cfg.ClashSecret)
+		for range 10 {
+			if err := c.UploadConfig(clash.SanitizePayload(cfg.ClashYAML)); err == nil {
+				log.Printf("Clash config pushed on startup")
+				return
+			} else {
+				log.Printf("Clash config push retry: %v", err)
+			}
+			time.Sleep(5 * time.Second)
+		}
+		log.Printf("Giving up pushing clash config — push it again from the config page")
+	}()
 
 	log.Printf("go-m3u8 web service starting...")
 	log.Printf("Open http://localhost:%d in your browser", store.Get().Port)

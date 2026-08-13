@@ -1,5 +1,6 @@
-# 主服务部署：直接拉取 Docker Hub 镜像（GitHub Actions 自动构建推送）
-# 如需本地构建：docker compose -f docker-compose.yml -f docker-compose.build.yml up -d
+# 主服务 + Clash 内核 (mihomo) 侧车容器
+# 镜像由 GitHub Actions 自动构建推送到 Docker Hub，无需本地编译。
+# 如需本地构建：docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 services:
   go-m3u8:
     image: ${DOCKERHUB_USER:-yu1998}/go-m3u8:latest
@@ -11,4 +12,19 @@ services:
       - ./config:/config
     environment:
       - CONFIG_DIR=/config
+      # Clash 侧车容器地址（同一 docker 网络内用服务名访问）
+      - CLASH_API=http://clash:9090
+      - CLASH_PROXY=http://clash:7890
+    restart: unless-stopped
+    depends_on:
+      - clash
+
+  # mihomo (Clash) 内核：接收主服务推送的配置，提供代理出口。
+  # 使用方式：页面「全局配置」粘贴你的 clash yaml 配置并启用。
+  clash:
+    image: metacubex/mihomo:latest
+    container_name: go-m3u8-clash
+    command: ["-d", "/clash", "-f", "/clash/config.yaml"]
+    volumes:
+      - ./clash:/clash
     restart: unless-stopped

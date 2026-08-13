@@ -481,20 +481,37 @@ AGENT_DIR=/downloads</div>
         <label>Agent 共享 Token（留空自动生成）</label>
         <input name="agent_token" placeholder="自动生成">
       </div>
-      <div class="form-group" style="margin-bottom:12px">
-        <label>HTTP 代理池（每行一个，如 http://ip:port；任务和重试自动轮换，降低单 IP 限流）</label>
-        <textarea id="proxies-textarea" rows="2" placeholder="http://1.2.3.4:8888&#10;http://5.6.7.8:8888"></textarea>
+      <div class="checkbox-group">
+        <label><input type="checkbox" name="clash_enabled"> 启用 Clash 代理（每任务轮换节点）</label>
       </div>
       <div class="form-row">
-        <div class="form-group" style="flex:2">
-          <label>动态代理 API（可选，每个任务自动拉取新代理，如 proxy.scdn.io）</label>
-          <input name="proxy_api_url" placeholder="https://proxy.scdn.io/api/get_proxy.php?protocol=http&count=5">
+        <div class="form-group">
+          <label>Clash API 地址</label>
+          <input name="clash_api" placeholder="http://clash:9090">
         </div>
-        <div class="form-group" style="flex:0 0 90px">
-          <label>数量</label>
-          <input name="proxy_api_count" type="number" value="5" min="1" max="20">
+        <div class="form-group">
+          <label>Clash 代理地址（mixed port）</label>
+          <input name="clash_proxy" placeholder="http://clash:7890">
+        </div>
+        <div class="form-group">
+          <label>选择组（留空自动检测）</label>
+          <input name="clash_group" placeholder="自动">
+        </div>
+        <div class="form-group">
+          <label>API 密钥（留空自动从配置读取）</label>
+          <input name="clash_secret" type="password" placeholder="自动提取">
         </div>
       </div>
+      <div class="form-group" style="margin-bottom:12px">
+        <label>Clash 配置文件内容（粘贴你的 yaml，保存后自动推送到 clash 内核）</label>
+        <textarea id="clash-yaml-textarea" name="clash_yaml" rows="6" placeholder="mixed-port: 7890&#10;proxies:&#10;  - name: 节点1&#10;    type: ss&#10;    server: ...&#10;    port: ...&#10;    cipher: ...&#10;    password: ...&#10;proxy-groups:&#10;  - name: 🚀 节点选择&#10;    type: select&#10;    proxies: [节点1]"></textarea>
+      </div>
+      <div class="form-row" style="align-items:center">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="testClash()">🧪 测试 Clash 连接</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="testClash(true)">🔄 重新检测节点</button>
+        <span id="clash-status" style="font-size:13px;color:var(--text-secondary)"></span>
+      </div>
+      <div id="clash-node-list" style="margin-top:10px"></div>
       <div class="form-group" style="margin-bottom:12px">
         <label>全局 Base URL</label>
         <input name="base_url" placeholder="留空不使用">
@@ -639,7 +656,6 @@ document.getElementById('modal').addEventListener('click', function(e) {
 const configForm = document.getElementById('config-form');
 const configSaved = document.getElementById('config-saved');
 const headersTextarea = document.getElementById('headers-textarea');
-const proxiesTextarea = document.getElementById('proxies-textarea');
 
 async function loadConfig() {
   try {
@@ -648,8 +664,6 @@ async function loadConfig() {
     for (const [key, val] of Object.entries(cfg)) {
       if (key === 'default_headers') {
         headersTextarea.value = Object.entries(val || {}).map(([k,v]) => k + ': ' + v).join('\n');
-      } else if (key === 'proxy_list') {
-        proxiesTextarea.value = (val || []).join('\n');
       } else {
         const el = configForm.elements[key];
         if (el) {
@@ -687,9 +701,6 @@ function collectConfig() {
     const idx = line.indexOf(':');
     if (idx > 0) data.default_headers[line.slice(0, idx).trim()] = line.slice(idx+1).trim();
   }
-  data.proxy_list = proxiesTextarea.value.split('\n')
-    .map(s => s.trim()).filter(s => s.length > 0);
-  data.proxy_api_count = parseInt(data.proxy_api_count) || 5;
   data.thread_count = parseInt(data.thread_count) || 16;
   data.download_retry_count = parseInt(data.download_retry_count) || 5;
   data.max_concurrent = parseInt(data.max_concurrent) || 3;
@@ -761,6 +772,7 @@ function taskCard(t) {
     </div>` : ''}
     <div class="task-meta">
       ${segText}
+      ${t.clash_node ? `<span title="本任务使用的 Clash 节点">🛰 ${esc(t.clash_node)}</span>` : ''}
       ${t.progress ? `<span>${esc(t.progress)}</span>` : ''}
       ${metaParts.join('')}
     </div>
@@ -804,6 +816,37 @@ async function deleteTask(id) {
   loadInitialTasks();
 }
 async function retryTask(id) { await fetch('/api/tasks/' + id + '/retry', {method:'POST'}); }
+
+// ---- Clash ----
+async function testClash(forceRefresh) {
+  try {
+    await saveConfig(); // 先保存（包括推送 clash yaml）
+    configSaved.style.display = 'inline';
+    setTimeout(() => configSaved.style.display = 'none', 2000);
+    const res = await fetch('/api/clash/status' + (forceRefresh ? '?refresh=1' : ''));
+    const d = await res.json();
+    const statusEl = document.getElementById('clash-status');
+    const listEl = document.getElementById('clash-node-list');
+    if (!d.ok) {
+      statusEl.innerHTML = '❌ ' + esc(d.error || '连接失败');
+      listEl.innerHTML = '';
+      return;
+    }
+    statusEl.innerHTML = `✅ 已连接 · 当前节点: <strong>${esc(d.current)}</strong> · 组: ${esc(d.group)} · 可用节点 ${(d.nodes||[]).length} 个`;
+    const items = (d.nodes || []).map(n => {
+      const delay = (d.delays && d.delays[n]) || 0;
+      const healthy = delay > 0;
+      return `<div class="file-item">
+        <span>${healthy ? '🟢' : '🔴'}</span>
+        <span class="file-name">${esc(n)}</span>
+        <span class="file-size">${healthy ? delay + 'ms' : '不可用'}</span>
+      </div>`;
+    }).join('');
+    listEl.innerHTML = items ? `<div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px">节点列表（🟢 可用 / 🔴 不可用，任务只在可用节点间轮换）：</div>${items}` : '';
+  } catch(e) {
+    document.getElementById('clash-status').innerHTML = '❌ ' + esc(e.message);
+  }
+}
 
 // Show/hide provider-specific fields based on the selected translate provider.
 function updateProviderFields() {

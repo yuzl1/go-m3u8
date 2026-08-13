@@ -32,15 +32,21 @@ type Config struct {
 	DeleteAfterSync   bool   `json:"delete_after_sync"`   // delete local file after sync
 	SyncConnections   int    `json:"sync_connections"`    // parallel chunk connections for sync (1-16)
 
-	// Proxy pool for downloads: rotated per task and per retry attempt so
-	// a single egress IP doesn't get rate-limited by the video site.
-	// One proxy per line, e.g. http://ip:port or http://user:pass@ip:port
-	ProxyList []string `json:"proxy_list"`
+	// MinSegments: fail the task when the parsed playlist has fewer
+	// segments than this (0 = off). Sites often serve a short teaser
+	// playlist to suspicious IPs (e.g. datacenter proxies) — a 2-hour
+	// video must never be a 2-segment playlist.
+	MinSegments int `json:"min_segments"`
 
-	// Dynamic proxy source: fetch fresh proxies from an API per task,
-	// e.g. https://proxy.scdn.io/api/get_proxy.php?protocol=http&count=5
-	ProxyAPIURL   string `json:"proxy_api_url"`
-	ProxyAPICount int    `json:"proxy_api_count"` // 1-20, default 5
+	// Clash integration: import a clash config (paste YAML in the UI),
+	// pushed to a mihomo sidecar container; each download task rotates
+	// to the next node of the selector group.
+	ClashEnabled bool   `json:"clash_enabled"`
+	ClashAPI     string `json:"clash_api"`    // mihomo external-controller, default http://127.0.0.1:9090
+	ClashSecret  string `json:"clash_secret"` // auto-extracted from the yaml when present
+	ClashProxy   string `json:"clash_proxy"`  // clash mixed port used as --custom-proxy, default http://127.0.0.1:7890
+	ClashGroup   string `json:"clash_group"`  // selector group name, empty = auto-detect
+	ClashYAML    string `json:"clash_yaml"`   // user's clash config content
 
 	// Filename handling: which cat-catch field becomes the saved name,
 	// and optional translation of the filename (e.g. English -> Chinese).
@@ -51,6 +57,14 @@ type Config struct {
 	TranslateAPIURL   string `json:"translate_api_url"`  // custom API template with {text}
 	BaiduAppID        string `json:"baidu_appid"`        // Baidu translate appid
 	BaiduAppKey       string `json:"baidu_appkey"`       // Baidu translate secret
+}
+
+// envOr returns the env var value or a fallback.
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
 
 // DefaultConfig returns sensible defaults.
@@ -77,6 +91,8 @@ func DefaultConfig() *Config {
 		TranslateEnabled:   false,
 		TranslateTarget:    "zh-CN",
 		TranslateProvider:  "google",
+		ClashAPI:           envOr("CLASH_API", "http://127.0.0.1:9090"),
+		ClashProxy:         envOr("CLASH_PROXY", "http://127.0.0.1:7890"),
 	}
 }
 
