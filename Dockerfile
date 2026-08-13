@@ -49,6 +49,27 @@ RUN set -e; \
     chmod +x /opt/nm3u8dl/N_m3u8DL-RE; \
     rm /tmp/nm3u8dl.tar.gz
 
+# mihomo (Clash) — each download task spawns its own instance for node
+# isolation. CI resolves the URLs via authenticated API; local builds
+# fall back to anonymous API + arch detection.
+ARG MIHOMO_URL_AMD64=""
+ARG MIHOMO_URL_ARM64=""
+RUN set -e; \
+    if [ "$TARGETARCH" = "arm64" ] && [ -n "$MIHOMO_URL_ARM64" ]; then URL="$MIHOMO_URL_ARM64"; \
+    elif [ -n "$MIHOMO_URL_AMD64" ]; then URL="$MIHOMO_URL_AMD64"; \
+    else \
+        ARCH=$(uname -m); \
+        case "$ARCH" in aarch64) MARCH="arm64" ;; *) MARCH="amd64" ;; esac; \
+        curl -sL "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest" -o /tmp/mihomo-rel.json; \
+        URL=$(grep -o '"browser_download_url": *"[^"]*mihomo-linux-'${MARCH}'[^"]*\.gz"' /tmp/mihomo-rel.json | grep -v compatible | head -1 | sed 's/.*"\(https:.*\)"/\1/'); \
+        rm -f /tmp/mihomo-rel.json; \
+    fi; \
+    echo "Downloading mihomo: $URL"; \
+    curl -sL "$URL" -o /tmp/mihomo.gz; \
+    gunzip -f /tmp/mihomo.gz; \
+    mv /tmp/mihomo /usr/local/bin/mihomo; \
+    chmod +x /usr/local/bin/mihomo
+
 ENV PATH="/opt/nm3u8dl:${PATH}"
 
 COPY --from=builder /app/go-m3u8 /usr/local/bin/go-m3u8

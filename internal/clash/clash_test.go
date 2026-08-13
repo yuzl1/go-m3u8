@@ -142,6 +142,54 @@ func TestExtractSecret(t *testing.T) {
 	}
 }
 
+func TestExtractNode(t *testing.T) {
+	yaml := `proxies:
+  - name: 香港 IEPL 01
+    type: ss
+    server: hk1.example.com
+    port: 8388
+    cipher: aes-256-gcm
+    password: secret
+  - name: 香港 IEPL 02
+    type: vmess
+    server: hk2.example.com
+    port: 443
+    uuid: xxx
+    alterId: 0
+`
+	block, err := ExtractNode(yaml, "香港 IEPL 02")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(block, "type: vmess") || !strings.Contains(block, "hk2.example.com") {
+		t.Fatalf("wrong block: %s", block)
+	}
+	if strings.Contains(block, "aes-256-gcm") {
+		t.Fatalf("block leaked the other node: %s", block)
+	}
+
+	if _, err := ExtractNode(yaml, "不存在的节点"); err == nil {
+		t.Fatal("expected error for missing node")
+	}
+}
+
+func TestBuildInstanceConfig(t *testing.T) {
+	block := "name: 香港 IEPL 01\ntype: ss\nserver: hk1.example.com\nport: 8388"
+	cfg := BuildInstanceConfig("香港 IEPL 01", block, 7910)
+	for _, want := range []string{
+		"mixed-port: 7910",
+		"  - name: 香港 IEPL 01",
+		"    type: ss",
+		"    server: hk1.example.com",
+		"    proxies: [香港 IEPL 01]",
+		"  - MATCH,TASK",
+	} {
+		if !strings.Contains(cfg, want) {
+			t.Errorf("config missing %q:\n%s", want, cfg)
+		}
+	}
+}
+
 func TestSanitizePayload(t *testing.T) {
 	out := SanitizePayload("proxies: []\nsecret: xyz")
 	if !strings.Contains(out, "mixed-port: 7890") {

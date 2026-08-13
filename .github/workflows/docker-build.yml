@@ -18,10 +18,10 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # N_m3u8DL-RE 的下载地址用认证过的 GitHub API 解析，
+      # N_m3u8DL-RE / mihomo 的下载地址用认证过的 GitHub API 解析，
       # 避免 Dockerfile 里匿名调用 API 在 CI 共享 IP 上触发限流。
-      - name: Resolve N_m3u8DL-RE asset URLs
-        id: nm3u8dl
+      - name: Resolve download URLs
+        id: downloads
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -32,8 +32,15 @@ jobs:
           [ -n "$X64" ] || { echo "linux-x64 asset not found"; exit 1; }
           echo "x64=$X64" >> "$GITHUB_OUTPUT"
           echo "arm64=$ARM64" >> "$GITHUB_OUTPUT"
-          echo "Resolved x64: $X64"
-          echo "Resolved arm64: $ARM64"
+          MIX64=$(gh api repos/MetaCubeX/mihomo/releases/latest \
+            --jq '.assets[] | select(.name | test("mihomo-linux-amd64")) | .browser_download_url' | grep -v compatible | grep '\.gz$' | head -1)
+          MIARM64=$(gh api repos/MetaCubeX/mihomo/releases/latest \
+            --jq '.assets[] | select(.name | test("mihomo-linux-arm64")) | .browser_download_url' | grep -v compatible | grep '\.gz$' | head -1)
+          [ -n "$MIX64" ] || { echo "mihomo amd64 asset not found"; exit 1; }
+          echo "mihomo_amd64=$MIX64" >> "$GITHUB_OUTPUT"
+          echo "mihomo_arm64=$MIARM64" >> "$GITHUB_OUTPUT"
+          echo "Resolved mihomo amd64: $MIX64"
+          echo "Resolved mihomo arm64: $MIARM64"
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
@@ -62,7 +69,9 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           build-args: |
-            NM3U8DL_URL_X64=${{ steps.nm3u8dl.outputs.x64 }}
-            NM3U8DL_URL_ARM64=${{ steps.nm3u8dl.outputs.arm64 }}
+            NM3U8DL_URL_X64=${{ steps.downloads.outputs.x64 }}
+            NM3U8DL_URL_ARM64=${{ steps.downloads.outputs.arm64 }}
+            MIHOMO_URL_AMD64=${{ steps.downloads.outputs.mihomo_amd64 }}
+            MIHOMO_URL_ARM64=${{ steps.downloads.outputs.mihomo_arm64 }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
