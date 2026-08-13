@@ -6,266 +6,342 @@
 <title>go-m3u8 下载管理器</title>
 <style>
 :root {
-  --bg: #f5f5f5;
+  --bg: #f4f5f7;
   --card-bg: #ffffff;
-  --text: #333333;
-  --text-secondary: #666666;
-  --border: #e0e0e0;
+  --text: #1f2937;
+  --text-secondary: #6b7280;
+  --border: #e5e7eb;
   --primary: #4f46e5;
   --primary-hover: #4338ca;
   --danger: #dc2626;
   --danger-hover: #b91c1c;
-  --retry: #2563eb;
   --success: #16a34a;
-  --warning: #f59e0b;
-  --radius: 8px;
-  --shadow: 0 1px 3px rgba(0,0,0,0.1);
+  --warning: #d97706;
+  --radius: 12px;
+  --shadow: 0 1px 2px rgba(0,0,0,0.05), 0 1px 6px rgba(0,0,0,0.04);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #1a1a2e;
-    --card-bg: #252540;
-    --text: #e0e0e0;
-    --text-secondary: #999;
-    --border: #3a3a5c;
+    --bg: #14151a;
+    --card-bg: #1e1f26;
+    --text: #e5e7eb;
+    --text-secondary: #9ca3af;
+    --border: #2e3038;
     --primary: #818cf8;
     --primary-hover: #6366f1;
-    --danger: #ef4444;
-    --danger-hover: #dc2626;
-    --retry: #60a5fa;
-    --success: #22c55e;
+    --danger: #f87171;
+    --danger-hover: #ef4444;
+    --success: #4ade80;
     --warning: #fbbf24;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #1a1a2e;
-  --card-bg: #252540;
-  --text: #e0e0e0;
-  --text-secondary: #999;
-  --border: #3a3a5c;
+  --bg: #14151a;
+  --card-bg: #1e1f26;
+  --text: #e5e7eb;
+  --text-secondary: #9ca3af;
+  --border: #2e3038;
   --primary: #818cf8;
   --primary-hover: #6366f1;
-  --danger: #ef4444;
-  --danger-hover: #dc2626;
-  --retry: #60a5fa;
-  --success: #22c55e;
+  --danger: #f87171;
+  --danger-hover: #ef4444;
+  --success: #4ade80;
   --warning: #fbbf24;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Roboto, sans-serif;
   background: var(--bg);
   color: var(--text);
   line-height: 1.6;
-  padding: 20px;
+  padding: 16px;
 }
-.container { max-width: 1000px; margin: 0 auto; }
+.container { max-width: 860px; margin: 0 auto; }
 
-h1 {
-  font-size: 24px;
-  margin-bottom: 24px;
+header.app-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+header.app-header h1 { font-size: 22px; }
+header.app-header span { font-size: 13px; color: var(--text-secondary); }
+
+h2 {
+  font-size: 16px;
+  margin-bottom: 14px;
   display: flex;
   align-items: center;
-  gap: 10px;
-}
-h1 span { font-size: 14px; color: var(--text-secondary); font-weight: normal; }
-h2 {
-  font-size: 18px;
-  margin-bottom: 16px;
-  padding-bottom: 8px;
-  border-bottom: 2px solid var(--primary);
+  gap: 8px;
 }
 
 .card {
   background: var(--card-bg);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  padding: 20px;
-  margin-bottom: 20px;
+  border: 1px solid var(--border);
+  padding: 18px;
+  margin-bottom: 16px;
 }
 
-.form-row {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 14px;
-  flex-wrap: wrap;
-  align-items: flex-end;
-}
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.form-group label {
-  font-size: 13px;
+/* Tabs */
+.tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 16px; }
+.tab-btn {
+  padding: 7px 16px;
+  border: 1px solid var(--border);
+  background: var(--card-bg);
   color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  border-radius: 999px;
+  transition: all 0.15s;
+}
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
   font-weight: 500;
 }
-.form-group input,
-.form-group select {
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* Forms */
+.form-row { display: flex; gap: 14px; margin-bottom: 14px; flex-wrap: wrap; align-items: flex-end; }
+.form-group { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 140px; }
+.form-group label { font-size: 12px; color: var(--text-secondary); font-weight: 500; }
+.form-group input, .form-group textarea {
   padding: 8px 12px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 14px;
   background: var(--bg);
   color: var(--text);
-  min-width: 120px;
+  width: 100%;
 }
-.form-group input:focus { outline: none; border-color: var(--primary); }
-.inline { flex-direction: row; align-items: center; gap: 8px; }
-.inline label { min-width: auto; }
-.checkbox-group { display: flex; gap: 20px; flex-wrap: wrap; }
+.form-group input:focus, .form-group textarea:focus { outline: none; border-color: var(--primary); }
+.checkbox-group { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 14px; }
+.checkbox-group label { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+.checkbox-group input { accent-color: var(--primary); width: 15px; height: 15px; }
 
 .btn {
   padding: 8px 18px;
   border: none;
-  border-radius: 6px;
-  font-size: 14px;
+  border-radius: 8px;
+  font-size: 13px;
   cursor: pointer;
   font-weight: 500;
-  transition: background 0.15s;
+  transition: background 0.15s, opacity 0.15s;
+  white-space: nowrap;
 }
+.btn:hover { opacity: 0.88; }
 .btn-primary { background: var(--primary); color: #fff; }
-.btn-primary:hover { background: var(--primary-hover); }
 .btn-danger { background: var(--danger); color: #fff; }
-.btn-danger:hover { background: var(--danger-hover); }
-.btn-retry { background: var(--retry); color: #fff; }
-.btn-retry:hover { background: #1d4ed8; }
-.btn-sm { padding: 4px 12px; font-size: 12px; }
+.btn-retry { background: var(--success); color: #fff; }
+.btn-ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); }
+.btn-sm { padding: 4px 12px; font-size: 12px; border-radius: 6px; }
 
 /* Status badges */
 .badge {
   display: inline-block;
-  padding: 2px 8px;
-  border-radius: 12px;
+  padding: 2px 10px;
+  border-radius: 999px;
   font-size: 12px;
   font-weight: 500;
+  white-space: nowrap;
 }
-.badge-pending { background: #e5e7eb; color: #6b7280; }
+.badge-pending { background: #f3f4f6; color: #6b7280; }
 .badge-downloading { background: #dbeafe; color: #2563eb; }
 .badge-merging { background: #fef3c7; color: #d97706; }
 .badge-done { background: #d1fae5; color: #059669; }
 .badge-failed { background: #fee2e2; color: #dc2626; }
 .badge-cancelled { background: #f3f4f6; color: #9ca3af; }
-.badge-retrying { background: #ede9fe; color: #7c3aed; }
 
-/* Task table */
-.task-table { width: 100%; border-collapse: collapse; }
-.task-table th, .task-table td {
-  padding: 10px 12px;
-  text-align: left;
-  border-bottom: 1px solid var(--border);
-  font-size: 13px;
+/* Task cards */
+.task-list { display: flex; flex-direction: column; gap: 12px; }
+.task-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  transition: box-shadow 0.15s;
 }
-.task-table th { font-weight: 600; color: var(--text-secondary); }
-.task-table td { vertical-align: middle; }
-.task-table .url-cell {
-  max-width: 200px;
+.task-card:hover { box-shadow: var(--shadow); }
+.task-card.st-downloading, .task-card.st-merging, .task-card.st-pending { border-left-color: var(--primary); }
+.task-card.st-done { border-left-color: var(--success); }
+.task-card.st-failed { border-left-color: var(--danger); }
+.task-card.st-cancelled { border-left-color: var(--text-secondary); }
+
+.task-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.task-title {
+  font-size: 14px;
+  font-weight: 600;
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.task-table .err-cell {
-  max-width: 200px;
-  color: var(--danger);
+.task-url {
   font-size: 12px;
-  cursor: pointer;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  word-break: break-all;
 }
-.task-table .err-cell:hover { opacity: 0.8; }
-.task-table .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.task-progress { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.progress-track {
+  flex: 1;
+  height: 8px;
+  background: var(--bg);
+  border-radius: 999px;
+  overflow: hidden;
+  min-width: 60px;
+}
+.progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.4s ease;
+  background: linear-gradient(90deg, var(--primary), #7c3aed);
+}
+.st-done .progress-fill { background: linear-gradient(90deg, #22c55e, #16a34a); }
+.st-failed .progress-fill { background: linear-gradient(90deg, #ef4444, #dc2626); }
+.progress-pct { font-size: 12px; font-weight: 600; color: var(--text); min-width: 46px; text-align: right; }
+
+.task-meta {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+.task-output {
+  font-size: 12px;
+  color: var(--success);
+  margin-bottom: 4px;
+  word-break: break-all;
+}
+.task-error {
+  font-size: 12px;
+  color: var(--danger);
+  cursor: pointer;
+  margin-bottom: 6px;
+  word-break: break-all;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.task-error:hover { text-decoration: underline; }
+.task-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 
 .empty-state {
   text-align: center;
   color: var(--text-secondary);
-  padding: 32px;
+  padding: 40px 20px;
   font-size: 14px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
 }
 
-/* Tabs */
-.tabs { display: flex; gap: 0; margin-bottom: 0; }
-.tab-btn {
-  padding: 8px 20px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 14px;
-  border-radius: var(--radius) var(--radius) 0 0;
-  margin-right: -1px;
+/* Files section */
+.files-section { margin-top: 18px; }
+.files-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.files-head h3 { font-size: 14px; flex: 1; }
+.file-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  flex-wrap: wrap;
 }
-.tab-btn.active { background: var(--card-bg); color: var(--text); border-bottom-color: var(--card-bg); font-weight: 500; }
-.tab-content { display: none; padding-top: 12px; }
-.tab-content.active { display: block; }
+.file-item:last-child { border-bottom: none; }
+.file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-size { color: var(--text-secondary); font-size: 12px; min-width: 70px; text-align: right; }
+.file-time { color: var(--text-secondary); font-size: 12px; min-width: 100px; text-align: right; }
 
+/* Code blocks */
 .cat-catch-code {
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 12px;
   font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 13px;
+  font-size: 12px;
   word-break: break-all;
   line-height: 1.5;
   user-select: all;
+  margin-bottom: 6px;
 }
-.cat-catch-note {
-  font-size: 12px;
-  color: var(--text-secondary);
-  margin-top: 8px;
-}
-.cat-catch-note code {
+.cat-catch-note { font-size: 12px; color: var(--text-secondary); margin-bottom: 14px; }
+.cat-catch-note code, .doc-table code {
   background: var(--bg);
-  padding: 1px 4px;
-  border-radius: 3px;
-  font-size: 12px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 11px;
 }
+.doc-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.doc-table th, .doc-table td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+.doc-table th { color: var(--text-secondary); font-weight: 600; }
+.doc-table { display: block; overflow-x: auto; white-space: nowrap; }
 
-/* Error modal */
-.err-modal {
+/* Modal */
+.modal {
   display: none;
   position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.5);
+  background: rgba(0,0,0,0.55);
   align-items: center; justify-content: center;
   z-index: 1000;
+  padding: 16px;
 }
-.err-modal.show { display: flex; }
-.err-modal-content {
+.modal.show { display: flex; }
+.modal-content {
   background: var(--card-bg);
   border-radius: var(--radius);
-  padding: 24px;
-  max-width: 640px;
-  width: 90%;
+  padding: 20px;
+  max-width: 680px;
+  width: 100%;
   max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+.modal-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.modal-head h3 { font-size: 14px; flex: 1; }
+.modal-body {
   overflow-y: auto;
   white-space: pre-wrap;
-  font-family: monospace;
-  font-size: 13px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
   line-height: 1.5;
   word-break: break-all;
-  position: relative;
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 12px;
 }
-.err-modal-close {
-  position: sticky; top: 0; float: right;
-  background: var(--text-secondary);
-  color: #fff;
-  border: none;
-  border-radius: 4px;
-  padding: 4px 12px;
-  cursor: pointer;
-  font-size: 14px;
+
+@media (max-width: 600px) {
+  body { padding: 10px; }
+  .card { padding: 14px; }
+  .form-group { min-width: 100%; }
+  .task-meta { gap: 8px; }
 }
 </style>
 </head>
 <body>
 <div class="container">
-<h1>
-  🎬 go-m3u8 下载管理器
+<header class="app-header">
+  <h1>🎬 go-m3u8 下载管理器</h1>
   <span>配合 N_m3u8DL-RE + 猫抓</span>
-</h1>
+</header>
 
 <div class="tabs">
   <button class="tab-btn active" data-tab="tab-downloads">📥 任务列表</button>
@@ -275,157 +351,143 @@ h2 {
 </div>
 
 <!-- Tasks Tab -->
-<div id="tab-downloads" class="tab-content active card">
-  <h2>下载任务</h2>
-  <div id="task-list"></div>
-  <div style="margin-top:16px">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-      <h3 style="font-size:15px">📁 已下载文件</h3>
-      <button class="btn btn-sm" onclick="refreshFiles()" style="background:var(--primary);color:#fff">刷新</button>
+<div id="tab-downloads" class="tab-content active">
+  <div class="card">
+    <h2>下载任务 <span style="font-size:12px;color:var(--text-secondary);font-weight:normal" id="task-count"></span></h2>
+    <div id="task-list" class="task-list"></div>
+  </div>
+  <div class="card files-section">
+    <div class="files-head">
+      <h3>📁 已下载文件</h3>
+      <button class="btn btn-ghost btn-sm" onclick="refreshFiles()">刷新</button>
     </div>
     <div id="file-list" style="font-size:13px;color:var(--text-secondary)">加载中...</div>
   </div>
 </div>
 
 <!-- Config Tab -->
-<div id="tab-config" class="tab-content card">
-  <h2>全局配置</h2>
-  <form id="config-form">
-    <div class="form-row">
-      <div class="form-group">
-        <label>保存目录 (save-dir)</label>
-        <input name="save_dir" placeholder="./downloads" style="min-width:240px">
+<div id="tab-config" class="tab-content">
+  <div class="card">
+    <h2>全局配置</h2>
+    <form id="config-form">
+      <div class="form-row">
+        <div class="form-group">
+          <label>保存目录 (save-dir)</label>
+          <input name="save_dir" placeholder="/downloads">
+        </div>
+        <div class="form-group">
+          <label>临时目录 (tmp-dir)</label>
+          <input name="tmp_dir" placeholder="留空使用默认">
+        </div>
       </div>
-      <div class="form-group">
-        <label>临时目录 (tmp-dir)</label>
-        <input name="tmp_dir" placeholder="留空使用默认" style="min-width:240px">
+      <div class="form-row">
+        <div class="form-group">
+          <label>下载线程数</label>
+          <input name="thread_count" type="number" value="16" min="1" max="64">
+        </div>
+        <div class="form-group">
+          <label>分片重试次数</label>
+          <input name="download_retry_count" type="number" value="5" min="1" max="20">
+        </div>
+        <div class="form-group">
+          <label>最大并行任务数</label>
+          <input name="max_concurrent" type="number" value="3" min="1" max="10">
+        </div>
+        <div class="form-group">
+          <label>N_m3u8DL-RE 路径</label>
+          <input name="nm3u8dl_path" placeholder="N_m3u8DL-RE">
+        </div>
       </div>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label>下载线程数 (thread-count)</label>
-        <input name="thread_count" type="number" value="16" min="1" max="64" style="width:80px">
+      <div class="checkbox-group">
+        <label><input type="checkbox" name="auto_select" checked> 自动选择最佳轨道</label>
+        <label><input type="checkbox" name="del_after_done" checked> 完成删除临时文件</label>
+        <label><input type="checkbox" name="concurrent" checked> 并发下载音视频字幕</label>
+        <label><input type="checkbox" name="check_segments" checked> 合并前校验分片数</label>
       </div>
-      <div class="form-group">
-        <label>分片重试次数</label>
-        <input name="download_retry_count" type="number" value="5" min="1" max="20" style="width:80px">
+      <div class="form-group" style="margin-bottom:12px">
+        <label>全局 Base URL</label>
+        <input name="base_url" placeholder="留空不使用">
       </div>
-      <div class="form-group">
-        <label>最大并行任务数</label>
-        <input name="max_concurrent" type="number" value="3" min="1" max="10" style="width:80px">
+      <div class="form-group" style="margin-bottom:14px">
+        <label>默认 HTTP Headers（每行一个，格式: Header-Name: value）</label>
+        <textarea id="headers-textarea" rows="3" placeholder="Referer: https://example.com&#10;User-Agent: Mozilla/5.0"></textarea>
       </div>
-      <div class="form-group">
-        <label>N_m3u8DL-RE 路径</label>
-        <input name="nm3u8dl_path" placeholder="N_m3u8DL-RE" style="min-width:160px">
-      </div>
-    </div>
-    <div class="form-row checkbox-group">
-      <label class="inline"><input type="checkbox" name="auto_select" checked> 自动选择最佳轨道 (auto-select)</label>
-      <label class="inline"><input type="checkbox" name="del_after_done" checked> 下载完删除临时文件 (del-after-done)</label>
-      <label class="inline"><input type="checkbox" name="concurrent" checked> 并发下载音视频字幕 (mt)</label>
-      <label class="inline"><input type="checkbox" name="check_segments" checked> 合并前校验分片数 (check-segments-count)</label>
-    </div>
-    <div class="form-group" style="margin-bottom:12px">
-      <label>全局 Base URL</label>
-      <input name="base_url" placeholder="留空不使用" style="min-width:100%">
-    </div>
-    <div class="form-group" style="margin-bottom:12px">
-      <label>默认 HTTP Headers（每行一个，格式: Header-Name: value）</label>
-      <textarea id="headers-textarea" rows="3" placeholder="Referer: https://example.com&#10;User-Agent: Mozilla/5.0" style="padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-family:monospace;font-size:13px;width:100%;resize:vertical"></textarea>
-    </div>
-    <button type="submit" class="btn btn-primary">💾 保存配置</button>
-    <span id="config-saved" style="color:var(--success);margin-left:12px;display:none">✅ 已保存</span>
-  </form>
+      <button type="submit" class="btn btn-primary">💾 保存配置</button>
+      <span id="config-saved" style="color:var(--success);margin-left:10px;display:none">✅ 已保存</span>
+    </form>
+  </div>
 </div>
 
 <!-- Quick Download Tab -->
-<div id="tab-quick" class="tab-content card">
-  <h2>快速下载（调试用）</h2>
-  <form id="quick-form">
-    <div class="form-row">
-      <div class="form-group" style="flex:1;min-width:300px">
+<div id="tab-quick" class="tab-content">
+  <div class="card">
+    <h2>快速下载（调试用）</h2>
+    <form id="quick-form">
+      <div class="form-group" style="margin-bottom:12px">
         <label>M3U8 / MPD URL *</label>
-        <input name="url" placeholder="https://example.com/video.m3u8" required style="width:100%">
+        <input name="url" placeholder="https://example.com/video.m3u8" required>
       </div>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label>文件名 (title)</label>
-        <input name="title" placeholder="视频标题" style="min-width:200px">
+      <div class="form-row">
+        <div class="form-group"><label>文件名 (title)</label><input name="title" placeholder="视频标题"></div>
+        <div class="form-group"><label>Referer</label><input name="referer" placeholder="https://..."></div>
       </div>
-      <div class="form-group">
-        <label>Referer</label>
-        <input name="referer" placeholder="https://..." style="min-width:200px">
+      <div class="form-row">
+        <div class="form-group"><label>Cookie</label><input name="cookie" placeholder="key=value; ..."></div>
+        <div class="form-group"><label>User-Agent</label><input name="ua" placeholder="Mozilla/5.0..."></div>
       </div>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label>Cookie</label>
-        <input name="cookie" placeholder="key=value; ..." style="min-width:240px">
+      <div class="form-row">
+        <div class="form-group"><label>Base URL</label><input name="base_url" placeholder="覆盖全局 Base URL"></div>
+        <div class="form-group"><label>保存目录 (覆盖全局)</label><input name="save_dir" placeholder="留空使用全局配置"></div>
       </div>
-      <div class="form-group">
-        <label>User-Agent</label>
-        <input name="ua" placeholder="Mozilla/5.0..." style="min-width:240px">
-      </div>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label>Base URL</label>
-        <input name="base_url" placeholder="覆盖全局 Base URL" style="min-width:240px">
-      </div>
-      <div class="form-group">
-        <label>保存目录 (覆盖全局)</label>
-        <input name="save_dir" placeholder="留空使用全局配置" style="min-width:240px">
-      </div>
-    </div>
-    <button type="submit" class="btn btn-primary">⬇️ 开始下载</button>
-  </form>
+      <button type="submit" class="btn btn-primary">⬇️ 开始下载</button>
+    </form>
+  </div>
 </div>
 
-<!-- Cat-Catch Config Tab -->
-<div id="tab-catcatch" class="tab-content card">
-  <h2>🐱 猫抓 (Cat-Catch) 集成配置</h2>
-  <p style="margin-bottom:12px;color:var(--text-secondary)">
-    参考官方文档：<a href="https://cat-catch.94cat.com/docs/settings#send" target="_blank" rel="noopener" style="color:var(--primary)">cat-catch.94cat.com/docs/settings#send</a>
-  </p>
-
-  <h3 style="font-size:15px;margin-bottom:8px">配置方法</h3>
-  <p style="margin-bottom:4px;color:var(--text-secondary);font-size:13px">
-    猫抓 → 设置 → 调用程序，新增一个调用程序，填入以下 URL 模板：
-  </p>
-  <div class="cat-catch-code" id="catcatch-url">http://localhost:8080/api/download?url=${url}&title=${title}&referer=${referer}</div>
-  <p class="cat-catch-note">
-    可用变量：<code>${url}</code>（m3u8地址）、<code>${title}</code>（页面标题）、<code>${referer}</code>（来源页）、<code>${cookie}</code>（Cookie）、<code>${userAgent}</code>（UA）
-  </p>
-
-  <h3 style="font-size:15px;margin:20px 0 8px">curl 测试</h3>
-  <div class="cat-catch-code">curl "http://localhost:8080/api/download?url=...&title=test&referer=..."</div>
-
-  <h3 style="font-size:15px;margin:20px 0 8px">POST JSON 方式</h3>
-  <div class="cat-catch-code">curl -X POST "http://localhost:8080/api/download" \
+<!-- Cat-Catch Tab -->
+<div id="tab-catcatch" class="tab-content">
+  <div class="card">
+    <h2>🐱 猫抓 (Cat-Catch) 集成配置</h2>
+    <p style="margin-bottom:12px;color:var(--text-secondary);font-size:13px">
+      参考官方文档：<a href="https://cat-catch.94cat.com/docs/settings#send" target="_blank" rel="noopener" style="color:var(--primary)">cat-catch.94cat.com/docs/settings#send</a>
+    </p>
+    <h3 style="font-size:14px;margin-bottom:8px">调用程序 URL 模板</h3>
+    <div class="cat-catch-code" id="catcatch-url">http://localhost:8080/api/download?url=${url}&title=${title}&referer=${referer}</div>
+    <p class="cat-catch-note">
+      可用变量：<code>${url}</code>（m3u8地址）、<code>${title}</code>（页面标题）、<code>${referer}</code>（来源页）、<code>${cookie}</code>、<code>${userAgent}</code>
+    </p>
+    <h3 style="font-size:14px;margin-bottom:8px">curl 测试</h3>
+    <div class="cat-catch-code">curl "http://localhost:8080/api/download?url=...&title=test&referer=..."</div>
+    <h3 style="font-size:14px;margin:14px 0 8px">POST JSON 方式</h3>
+    <div class="cat-catch-code">curl -X POST "http://localhost:8080/api/download" \
   -H "Content-Type: application/json" \
   -d '{"url":"https://example.com/video.m3u8","title":"我的视频","referer":"https://example.com/"}'</div>
-
-  <h3 style="font-size:15px;margin:20px 0 8px">API 端点参考</h3>
-  <table class="task-table">
-    <tr><th>方法</th><th>路径</th><th>说明</th></tr>
-    <tr><td>GET/POST</td><td>/api/download</td><td>触发下载（querystring 或 JSON body）</td></tr>
-    <tr><td>GET</td><td>/api/tasks</td><td>获取所有任务状态</td></tr>
-    <tr><td>DELETE</td><td>/api/tasks/{id}</td><td>取消任务；加 <code>?action=delete</code> 删除已完成任务</td></tr>
-    <tr><td>POST</td><td>/api/tasks/{id}/retry</td><td>重试失败任务</td></tr>
-    <tr><td>GET</td><td>/api/config</td><td>获取全局配置</td></tr>
-    <tr><td>PUT</td><td>/api/config</td><td>更新全局配置</td></tr>
-    <tr><td>GET</td><td>/ws</td><td>WebSocket 实时推送</td></tr>
-  </table>
+    <h3 style="font-size:14px;margin:14px 0 8px">API 端点参考</h3>
+    <table class="doc-table">
+      <tr><th>方法</th><th>路径</th><th>说明</th></tr>
+      <tr><td>GET/POST</td><td>/api/download</td><td>触发下载（querystring 或 JSON body）</td></tr>
+      <tr><td>GET</td><td>/api/tasks</td><td>获取所有任务状态</td></tr>
+      <tr><td>DELETE</td><td>/api/tasks/{id}</td><td>取消任务；加 <code>?action=delete</code> 删除已完成任务</td></tr>
+      <tr><td>POST</td><td>/api/tasks/{id}/retry</td><td>重试失败任务</td></tr>
+      <tr><td>GET</td><td>/api/tasks/{id}/log</td><td>获取任务完整日志</td></tr>
+      <tr><td>GET</td><td>/api/config</td><td>获取全局配置</td></tr>
+      <tr><td>PUT</td><td>/api/config</td><td>更新全局配置</td></tr>
+      <tr><td>GET</td><td>/api/files</td><td>列出下载目录文件</td></tr>
+      <tr><td>GET</td><td>/ws</td><td>WebSocket 实时推送</td></tr>
+    </table>
+  </div>
 </div>
 
 </div><!-- /container -->
 
-<!-- Error Modal -->
-<div class="err-modal" id="err-modal">
-  <div class="err-modal-content">
-    <button class="err-modal-close" onclick="closeErrModal()">✕ 关闭</button>
-    <div id="err-modal-body"></div>
+<!-- Modal -->
+<div class="modal" id="modal">
+  <div class="modal-content">
+    <div class="modal-head">
+      <h3 id="modal-title">日志</h3>
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">✕ 关闭</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
   </div>
 </div>
 
@@ -441,6 +503,19 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.classList.add('active');
     document.getElementById(btn.dataset.tab).classList.add('active');
   });
+});
+
+// ---- Modal ----
+function showModal(title, text) {
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-body').textContent = text;
+  document.getElementById('modal').classList.add('show');
+}
+function closeModal() {
+  document.getElementById('modal').classList.remove('show');
+}
+document.getElementById('modal').addEventListener('click', function(e) {
+  if (e.target === this) closeModal();
 });
 
 // ---- Config Form ----
@@ -459,11 +534,10 @@ async function loadConfig() {
         const el = configForm.elements[key];
         if (el) {
           if (el.type === 'checkbox') el.checked = val;
-          else if (el) el.value = val ?? '';
+          else el.value = val ?? '';
         }
       }
     }
-    // Update cat-catch URL
     const port = cfg.port || 8080;
     document.getElementById('catcatch-url').textContent =
       `http://localhost:${port}/api/download?url=$\{url}&title=$\{title}&referer=$\{referer}`;
@@ -492,7 +566,7 @@ configForm.addEventListener('submit', async (e) => {
     await fetch('/api/config', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data) });
     configSaved.style.display = 'inline';
     setTimeout(() => configSaved.style.display = 'none', 2000);
-  } catch(e) { alert('保存失败: ' + e.message); }
+  } catch(err) { alert('保存失败: ' + err.message); }
 });
 
 // ---- Quick Download Form ----
@@ -511,81 +585,53 @@ document.getElementById('quick-form').addEventListener('submit', async (e) => {
   } catch(err) { alert('请求失败: ' + err.message); }
 });
 
-// ---- Error Modal ----
-function showErrModal(text) {
-  document.getElementById('err-modal-body').textContent = text;
-  document.getElementById('err-modal').classList.add('show');
-}
-function closeErrModal() {
-  document.getElementById('err-modal').classList.remove('show');
-}
-document.getElementById('err-modal').addEventListener('click', function(e) {
-  if (e.target === this) closeErrModal();
-});
-
-// ---- Task Log ----
-async function showTaskLog(id) {
-  try {
-    const res = await fetch('/api/tasks/' + id + '/log');
-    const data = await res.json();
-    showErrModal(data.log || '(no log captured)');
-  } catch(e) {
-    showErrModal('Failed to load log: ' + e.message);
+// ---- Task Rendering (card layout) ----
+function taskCard(t) {
+  const pct = Math.min(t.percent || 0, 100);
+  const segText = t.total_segments > 0 ? `<span>分片 ${t.done_segments || 0}/${t.total_segments}</span>` : '';
+  const metaParts = [];
+  if (t.created_at) metaParts.push(`<span>🕐 ${formatTime(t.created_at)}</span>`);
+  const actions = [`<button class="btn btn-ghost btn-sm" onclick="showTaskLog('${t.id}')">日志</button>`];
+  if (t.status === 'pending' || t.status === 'downloading' || t.status === 'merging') {
+    actions.push(`<button class="btn btn-danger btn-sm" onclick="cancelTask('${t.id}')">取消</button>`);
+  } else if (t.status === 'done' || t.status === 'failed' || t.status === 'cancelled') {
+    if (t.status === 'failed' || t.status === 'cancelled') {
+      actions.push(`<button class="btn btn-retry btn-sm" onclick="retryTask('${t.id}')">重试</button>`);
+    }
+    actions.push(`<button class="btn btn-ghost btn-sm" onclick="deleteTask('${t.id}')">删除</button>`);
   }
+  const showBar = ['pending','downloading','merging','done'].includes(t.status);
+  return `<div class="task-card st-${t.status}">
+    <div class="task-head">
+      <span class="task-title" title="${esc(t.title || '未命名')}">🎬 ${esc(t.title || '未命名')}</span>
+      <span class="badge badge-${t.status}">${statusText(t.status)}</span>
+    </div>
+    <div class="task-url" title="${esc(t.url)}">🔗 ${esc(t.url)}</div>
+    ${showBar ? `<div class="task-progress">
+      <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
+      <span class="progress-pct">${pct > 0 ? pct.toFixed(1) + '%' : ''}</span>
+    </div>` : ''}
+    <div class="task-meta">
+      ${segText}
+      ${t.progress ? `<span>${esc(t.progress)}</span>` : ''}
+      ${metaParts.join('')}
+    </div>
+    ${t.output_file ? `<div class="task-output">📁 ${esc(t.output_file)}</div>` : ''}
+    ${t.error ? `<div class="task-error" onclick="showModal('错误详情', ${JSON.stringify(t.error).replace(/"/g, '&quot;')})">⚠ ${esc(t.error)}</div>` : ''}
+    <div class="task-actions">${actions.join('')}</div>
+  </div>`;
 }
 
-// ---- Task List Rendering ----
 function renderTasks() {
   const el = document.getElementById('task-list');
+  const count = document.getElementById('task-count');
   if (tasks.length === 0) {
-    el.innerHTML = '<div class="empty-state">暂无下载任务。使用猫抓捕获视频或在"快速下载"中手动输入。</div>';
+    el.innerHTML = '<div class="empty-state">暂无下载任务。使用猫抓捕获视频或在「快速下载」中手动输入。</div>';
+    count.textContent = '';
     return;
   }
-
-  const rows = tasks.map(t => {
-    const errDisplay = t.error
-      ? `<span class="err-cell" onclick="showErrModal(${JSON.stringify(t.error).replace(/"/g, '&quot;')})" title="点击查看完整错误">${esc(t.error.substring(0, 80))}${t.error.length > 80 ? '...' : ''}</span>`
-      : '-';
-    const retryBtn = t.status === 'failed'
-      ? `<button class="btn btn-retry btn-sm" onclick="retryTask('${t.id}')">重试</button>`
-      : '';
-    const pct = t.percent || 0;
-    const barColor = t.status === 'done' ? 'var(--success)' : t.status === 'failed' ? 'var(--danger)' : 'var(--primary)';
-    const segInfo = (t.total_segments > 0)
-      ? `<div style="font-size:11px;color:var(--text);margin-top:2px">分片: ${t.done_segments || 0}/${t.total_segments}</div>`
-      : '';
-    const progressCell = (t.status === 'pending' || t.status === 'downloading' || t.status === 'merging' || t.status === 'done')
-      ? `<div style="display:flex;align-items:center;gap:8px;min-width:120px">
-          <div style="flex:1;height:8px;background:var(--bg);border-radius:4px;overflow:hidden">
-            <div style="height:100%;width:${Math.min(pct,100)}%;background:${barColor};border-radius:4px;transition:width 0.3s"></div>
-          </div>
-          <span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;min-width:44px">${pct > 0 ? pct.toFixed(1) + '%' : ''}</span>
-        </div>
-        ${segInfo}
-        <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">${esc(t.progress || '')}</div>
-        ${t.output_file ? `<div style="font-size:11px;color:var(--success);margin-top:2px;word-break:break-all">📁 ${esc(t.output_file)}</div>` : ''}`
-      : esc(t.progress || '-');
-    return `<tr>
-      <td class="url-cell" title="${esc(t.url)}">${esc(t.url)}</td>
-      <td>${esc(t.title || '-')}</td>
-      <td><span class="badge badge-${t.status}">${statusText(t.status)}</span></td>
-      <td>${progressCell}</td>
-      <td>${errDisplay}</td>
-      <td>${formatTime(t.created_at)}</td>
-      <td class="actions">
-        <button class="btn btn-sm" onclick="showTaskLog('${t.id}')" style="background:var(--bg);color:var(--text);border:1px solid var(--border)">日志</button>
-        ${(t.status === 'pending' || t.status === 'downloading')
-          ? `<button class="btn btn-danger btn-sm" onclick="cancelTask('${t.id}')">取消</button>`
-          : (t.status === 'done' || t.status === 'failed' || t.status === 'cancelled')
-            ? `<button class="btn btn-sm" onclick="deleteTask('${t.id}')" style="background:var(--text-secondary);color:#fff">删除</button>` + retryBtn
-            : ''}
-      </td>
-    </tr>`;
-  }).reverse().join('');
-
-  el.innerHTML = `<table class="task-table">
-    <thead><tr><th>URL</th><th>标题</th><th>状态</th><th>进度</th><th>错误信息</th><th>时间</th><th>操作</th></tr></thead>
-    <tbody>${rows}</tbody></table>`;
+  count.textContent = `共 ${tasks.length} 个任务`;
+  el.innerHTML = tasks.map(taskCard).reverse().join('');
 }
 
 function statusText(s) {
@@ -595,8 +641,16 @@ function statusText(s) {
 
 async function cancelTask(id) { await fetch('/api/tasks/' + id, {method:'DELETE'}); }
 async function deleteTask(id) { await fetch('/api/tasks/' + id + '?action=delete', {method:'DELETE'}); }
-async function retryTask(id) {
-  await fetch('/api/tasks/' + id + '/retry', {method:'POST'});
+async function retryTask(id) { await fetch('/api/tasks/' + id + '/retry', {method:'POST'}); }
+
+async function showTaskLog(id) {
+  try {
+    const res = await fetch('/api/tasks/' + id + '/log');
+    const data = await res.json();
+    showModal('任务日志', data.log || '(no log captured)');
+  } catch(e) {
+    showModal('任务日志', 'Failed to load log: ' + e.message);
+  }
 }
 
 function esc(s) {
@@ -610,6 +664,15 @@ function formatTime(ts) {
   if (!ts) return '-';
   const d = new Date(ts);
   return d.toLocaleString('zh-CN', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+
+// ---- Initial task load (works even before websocket connects) ----
+async function loadInitialTasks() {
+  try {
+    const res = await fetch('/api/tasks');
+    tasks = await res.json();
+    renderTasks();
+  } catch(e) { console.error('loadInitialTasks', e); }
 }
 
 // ---- Files List ----
@@ -626,16 +689,13 @@ async function refreshFiles() {
       el.innerHTML = `目录 <code>${esc(data.dir)}</code> 为空`;
       return;
     }
-    const rows = data.files.map(f => `<tr>
-      <td>${f.is_dir ? '📂' : '🎬'} ${esc(f.name)}</td>
-      <td>${f.is_dir ? '-' : formatSize(f.size)}</td>
-      <td>${formatTime(f.mod_time)}</td>
-    </tr>`).join('');
-    el.innerHTML = `<div style="margin-bottom:4px;font-size:12px">目录: <code>${esc(data.dir)}</code>（${data.files.length} 项）</div>
-      <table class="task-table">
-        <thead><tr><th>文件名</th><th>大小</th><th>时间</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>`;
+    const items = data.files.map(f => `<div class="file-item">
+      <span>${f.is_dir ? '📂' : '🎬'}</span>
+      <span class="file-name" title="${esc(f.name)}">${esc(f.name)}</span>
+      <span class="file-size">${f.is_dir ? '-' : formatSize(f.size)}</span>
+      <span class="file-time">${formatTime(f.mod_time)}</span>
+    </div>`).join('');
+    el.innerHTML = `<div style="margin-bottom:6px;font-size:12px">目录: <code>${esc(data.dir)}</code>（${data.files.length} 项）</div>${items}`;
   } catch(e) {
     el.innerHTML = '加载失败: ' + esc(e.message);
   }
@@ -673,6 +733,7 @@ function connectWS() {
 
 // ---- Init ----
 loadConfig();
+loadInitialTasks();
 renderTasks();
 refreshFiles();
 connectWS();

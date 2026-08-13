@@ -4,6 +4,7 @@ import (
 	"embed"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/yuzl1/go-m3u8/internal/config"
 	"github.com/yuzl1/go-m3u8/internal/download"
@@ -32,8 +33,12 @@ func main() {
 		log.Fatalf("Failed to read embedded template: %v", err)
 	}
 
-	// Create download manager.
-	mgr := download.NewManager(store)
+	// Create download manager with persisted task history.
+	tasksFile := ""
+	if configDir != "" {
+		tasksFile = filepath.Join(configDir, "tasks.json")
+	}
+	mgr := download.NewManager(store, tasksFile)
 
 	// Create WebSocket handler.
 	wsHandler := ws.NewHandler(mgr)

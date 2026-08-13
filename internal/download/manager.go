@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"sync"
 	"time"
 
@@ -19,10 +21,11 @@ type StatusChange struct {
 
 // Manager orchestrates download tasks.
 type Manager struct {
-	mu       sync.RWMutex
-	tasks    map[string]*Task
-	order    []string // keep insertion order
-	cfgStore *config.Store
+	mu        sync.RWMutex
+	tasks     map[string]*Task
+	order     []string // keep insertion order
+	cfgStore  *config.Store
+	tasksFile string // persisted task history, "" disables persistence
 
 	// Concurrency control: buffered channel as semaphore.
 	sem chan struct{}
@@ -33,19 +36,67 @@ type Manager struct {
 	subsMu    sync.RWMutex
 }
 
-// NewManager creates a new Manager.
-func NewManager(cfgStore *config.Store) *Manager {
+// NewManager creates a new Manager. Task history is persisted to
+// tasksFile (JSON) so downloads survive server/container restarts.
+func NewManager(cfgStore *config.Store, tasksFile string) *Manager {
 	m := &Manager{
 		tasks:     make(map[string]*Task),
 		broadcast: make(chan *Task, 64),
 		subs:      make(map[chan *Task]struct{}),
 		cfgStore:  cfgStore,
+		tasksFile: tasksFile,
 	}
 	// Default max concurrent = 3; tightened by config.
 	m.sem = make(chan struct{}, 3)
 	m.applySem()
+	m.loadTasks()
 	go m.dispatch()
 	return m
+}
+
+// loadTasks restores task history from disk. Tasks that were still
+// running when the server stopped are marked as interrupted.
+func (m *Manager) loadTasks() {
+	if m.tasksFile == "" {
+		return
+	}
+	data, err := os.ReadFile(m.tasksFile)
+	if err != nil {
+		return
+	}
+	var tasks []*Task
+	if err := json.Unmarshal(data, &tasks); err != nil {
+		log.Printf("Failed to load task history: %v", err)
+		return
+	}
+	for _, t := range tasks {
+		if t == nil || t.ID == "" {
+			continue
+		}
+		if t.Status == "pending" || t.Status == "downloading" || t.Status == "merging" {
+			t.Status = "cancelled"
+			t.Progress = "服务重启，任务中断"
+		}
+		m.tasks[t.ID] = t
+		m.order = append(m.order, t.ID)
+	}
+	log.Printf("Restored %d tasks from history", len(tasks))
+}
+
+// saveTasks persists the current task list to disk.
+func (m *Manager) saveTasks() {
+	if m.tasksFile == "" {
+		return
+	}
+	m.mu.RLock()
+	data, err := json.Marshal(m.List())
+	m.mu.RUnlock()
+	if err != nil {
+		return
+	}
+	if err := os.WriteFile(m.tasksFile, data, 0644); err != nil {
+		log.Printf("Failed to persist tasks: %v", err)
+	}
 }
 
 func (m *Manager) applySem() {
@@ -166,6 +217,7 @@ func (m *Manager) Delete(id string) error {
 			break
 		}
 	}
+	m.saveTasks()
 	return nil
 }
 
@@ -185,7 +237,8 @@ func (m *Manager) Unsubscribe(ch chan *Task) {
 	m.subsMu.Unlock()
 }
 
-// dispatch reads from the broadcast channel and fans out to subscribers.
+// dispatch reads from the broadcast channel, fans out to subscribers,
+// and persists the task list on every change.
 func (m *Manager) dispatch() {
 	for task := range m.broadcast {
 		m.subsMu.RLock()
@@ -197,6 +250,7 @@ func (m *Manager) dispatch() {
 			}
 		}
 		m.subsMu.RUnlock()
+		m.saveTasks()
 	}
 }
 

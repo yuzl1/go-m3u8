@@ -219,12 +219,12 @@ func Run(ctx context.Context, cfg *config.Config, task *Task, statusCh chan<- *T
 }
 
 var (
-	pctRe        = regexp.MustCompile(`(\d+(?:\.\d+)?)\s*%`)
-	segRe        = regexp.MustCompile(`(\d+)\s*/\s*(\d+)`)
-	sizeSpeedRe  = regexp.MustCompile(`(\d+(?:\.\d+)?(?:B|KB|MB|GB))\s*/\s*(\d+(?:\.\d+)?(?:B|KB|MB|GB))\s*(\d+(?:\.\d+)?(?:B|KB|MB)ps)`)
-	totalSegRe   = regexp.MustCompile(`(?i)(?:total\s+segments?|分片总数|total)[^\d]{0,20}(\d+)`)
-	ansiRe       = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
-	outFileRe    = regexp.MustCompile(`(?i)(?:muxing\s+to|output(?: file)?[^:]*:|muxed\s+to|saving\s+to)\s+(.+)`)
+	pctRe       = regexp.MustCompile(`(\d+(?:\.\d+)?)\s*%`)
+	segRe       = regexp.MustCompile(`(\d+)\s*/\s*(\d+)`)
+	sizeSpeedRe = regexp.MustCompile(`(\d+(?:\.\d+)?(?:B|KB|MB|GB))\s*/\s*(\d+(?:\.\d+)?(?:B|KB|MB|GB))\s*(\d+(?:\.\d+)?(?:B|KB|MB)ps)`)
+	totalSegRe  = regexp.MustCompile(`(?i)(?:total\s+segments?|分片总数|total)[^\d]{0,20}(\d+)`)
+	ansiRe      = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
+	outFileRe   = regexp.MustCompile(`(?i)(?:muxing\s+to|output(?: file)?[^:]*:|muxed\s+to|saving\s+to)\s+(.+)`)
 	// failureRe matches fatal errors in N_m3u8DL-RE output. It logs
 	// "ERROR: Failed" on segment-count-check failure but still exits 0,
 	// so we must detect failure from the log, not just the exit code.
