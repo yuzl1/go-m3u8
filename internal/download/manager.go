@@ -288,7 +288,12 @@ func translateFilename(text string, cfg *config.Config) (string, bool) {
 	var lastErr error
 	for attempt := range 3 {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		zh, err := translate.Translate(ctx, text, cfg.TranslateTarget, cfg.TranslateAPIURL)
+		zh, err := translate.Translate(ctx, text, cfg.TranslateTarget, translate.Config{
+			Provider: cfg.TranslateProvider,
+			APIURL:   cfg.TranslateAPIURL,
+			AppID:    cfg.BaiduAppID,
+			AppKey:   cfg.BaiduAppKey,
+		})
 		cancel()
 		if err == nil && zh != "" {
 			return zh, true

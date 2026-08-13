@@ -241,7 +241,24 @@ func (h *Handler) TranslateText(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
-	zh, err := translate.Translate(ctx, text, target, apiURL)
+	provider := r.URL.Query().Get("provider")
+	if provider == "" {
+		provider = cfg.TranslateProvider
+	}
+	appID := r.URL.Query().Get("appid")
+	if appID == "" {
+		appID = cfg.BaiduAppID
+	}
+	appKey := r.URL.Query().Get("appkey")
+	if appKey == "" {
+		appKey = cfg.BaiduAppKey
+	}
+	zh, err := translate.Translate(ctx, text, target, translate.Config{
+		Provider: provider,
+		APIURL:   apiURL,
+		AppID:    appID,
+		AppKey:   appKey,
+	})
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return

@@ -34,10 +34,13 @@ type Config struct {
 
 	// Filename handling: which cat-catch field becomes the saved name,
 	// and optional translation of the filename (e.g. English -> Chinese).
-	FilenameSource   string `json:"filename_source"`   // auto | title | fullFileName
-	TranslateEnabled bool   `json:"translate_enabled"` // translate filename before saving
-	TranslateTarget  string `json:"translate_target"`  // target language, default zh-CN
-	TranslateAPIURL  string `json:"translate_api_url"` // custom API template with {text}, empty = Google free endpoint
+	FilenameSource    string `json:"filename_source"`    // auto | title | fullFileName
+	TranslateEnabled  bool   `json:"translate_enabled"`  // translate filename before saving
+	TranslateTarget   string `json:"translate_target"`   // target language, default zh-CN
+	TranslateProvider string `json:"translate_provider"` // google | baidu | custom
+	TranslateAPIURL   string `json:"translate_api_url"`  // custom API template with {text}
+	BaiduAppID        string `json:"baidu_appid"`        // Baidu translate appid
+	BaiduAppKey       string `json:"baidu_appkey"`       // Baidu translate secret
 }
 
 // DefaultConfig returns sensible defaults.
@@ -63,6 +66,7 @@ func DefaultConfig() *Config {
 		FilenameSource:     "auto",
 		TranslateEnabled:   false,
 		TranslateTarget:    "zh-CN",
+		TranslateProvider:  "google",
 	}
 }
 

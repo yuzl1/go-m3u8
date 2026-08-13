@@ -445,6 +445,14 @@ AGENT_DIR=/downloads</div>
           </select>
         </div>
         <div class="form-group">
+          <label>翻译服务</label>
+          <select name="translate_provider" id="translate-provider">
+            <option value="google">Google（免费，无需密钥）</option>
+            <option value="baidu">百度翻译（需 APPID/密钥）</option>
+            <option value="custom">自定义 API</option>
+          </select>
+        </div>
+        <div class="form-group">
           <label>翻译目标语言</label>
           <input name="translate_target" placeholder="zh-CN">
         </div>
@@ -455,8 +463,18 @@ AGENT_DIR=/downloads</div>
           <button type="button" class="btn btn-ghost btn-sm" onclick="testTranslate()">🧪 测试翻译</button>
         </div>
       </div>
-      <div class="form-group" style="margin-bottom:12px">
-        <label>自定义翻译 API（可选，需含 <code>{text}</code> 占位符；留空用 Google 免费接口）</label>
+      <div class="form-row" id="baidu-fields" style="display:none">
+        <div class="form-group">
+          <label>百度 APPID</label>
+          <input name="baidu_appid" placeholder="在百度翻译开放平台获取">
+        </div>
+        <div class="form-group">
+          <label>百度密钥 (appkey)</label>
+          <input name="baidu_appkey" type="password" placeholder="平台分配的密钥">
+        </div>
+      </div>
+      <div class="form-group" id="custom-api-field" style="margin-bottom:12px;display:none">
+        <label>自定义翻译 API（需含 <code>{text}</code> 占位符）</label>
         <input name="translate_api_url" placeholder="http://localhost:5001/translate?q={text}&source=en&target={target}">
       </div>
       <div class="form-group" style="margin-bottom:12px">
@@ -623,6 +641,7 @@ async function loadConfig() {
         }
       }
     }
+    updateProviderFields();
     const port = cfg.port || 8080;
     document.getElementById('catcatch-url').textContent =
       `http://localhost:${port}/api/download?url=$\{url}&title=$\{title}&referer=$\{referer}`;
@@ -765,6 +784,14 @@ async function deleteTask(id) {
   loadInitialTasks();
 }
 async function retryTask(id) { await fetch('/api/tasks/' + id + '/retry', {method:'POST'}); }
+
+// Show/hide provider-specific fields based on the selected translate provider.
+function updateProviderFields() {
+  const p = configForm.elements['translate_provider'].value;
+  document.getElementById('baidu-fields').style.display = p === 'baidu' ? 'flex' : 'none';
+  document.getElementById('custom-api-field').style.display = p === 'custom' ? 'block' : 'none';
+}
+document.getElementById('translate-provider').addEventListener('change', updateProviderFields);
 
 async function testTranslate() {
   const text = prompt('输入要翻译的英文文件名（测试用）', 'Date with a Flight Attendant');

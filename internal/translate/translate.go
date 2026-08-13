@@ -2,6 +2,9 @@ package translate
 
 import (
 	"context"
+	"crypto/md5"
+	crand "crypto/rand"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,20 +13,104 @@ import (
 	"strings"
 )
 
+// baiduEndpoint is a var so tests can point it at a local server.
+var baiduEndpoint = "https://fanyi-api.baidu.com/api/trans/vip/translate"
+
 const defaultGoogleBase = "https://translate.googleapis.com"
+
+// Config selects the translation provider.
+type Config struct {
+	Provider string // "google" (default), "baidu", "custom"
+	APIURL   string // custom endpoint template with {text}/{target}
+	AppID    string // Baidu appid
+	AppKey   string // Baidu appkey (secret)
+}
 
 // Translate translates text to the target language.
 //
-// When apiURL is empty, the free Google Translate endpoint is used
-// (works without an API key from most overseas servers).
-// When apiURL is set it is treated as a template: {text} and {target}
-// placeholders are replaced (compatible with e.g. LibreTranslate:
-// http://host:5000/translate?q={text}&source=en&target={target}).
-func Translate(ctx context.Context, text, target, apiURL string) (string, error) {
-	if apiURL != "" {
-		return translateCustom(ctx, text, target, apiURL)
+// Providers:
+//   - google: free endpoint, no key needed
+//   - baidu:  Baidu general translation API (sign = md5(appid+q+salt+appkey))
+//   - custom: user endpoint template, e.g. LibreTranslate
+//     http://host:5000/translate?q={text}&source=en&target={target}
+func Translate(ctx context.Context, text, target string, cfg Config) (string, error) {
+	switch cfg.Provider {
+	case "baidu":
+		return translateBaidu(ctx, text, target, cfg.AppID, cfg.AppKey)
+	case "custom":
+		return translateCustom(ctx, text, target, cfg.APIURL)
+	default:
+		return translateGoogle(ctx, text, target, defaultGoogleBase)
 	}
-	return translateGoogle(ctx, text, target, defaultGoogleBase)
+}
+
+// translateBaidu implements the Baidu general translation API.
+// sign = md5(appid + q + salt + appkey), q NOT url-encoded in the sign.
+func translateBaidu(ctx context.Context, text, target, appID, appKey string) (string, error) {
+	if appID == "" || appKey == "" {
+		return "", fmt.Errorf("baidu provider requires appid and appkey")
+	}
+	salt := randomSalt()
+	signStr := appID + text + salt + appKey
+	sign := fmt.Sprintf("%x", md5.Sum([]byte(signStr)))
+
+	u := baiduEndpoint +
+		"?q=" + url.QueryEscape(text) +
+		"&from=auto&to=" + url.QueryEscape(mapBaiduLang(target)) +
+		"&appid=" + url.QueryEscape(appID) +
+		"&salt=" + url.QueryEscape(salt) +
+		"&sign=" + sign
+
+	body, err := fetch(ctx, u)
+	if err != nil {
+		return "", err
+	}
+	return parseBaiduResponse(body)
+}
+
+// parseBaiduResponse extracts the translation from a Baidu API response.
+func parseBaiduResponse(body []byte) (string, error) {
+	var resp struct {
+		TransResult []struct {
+			Src string `json:"src"`
+			Dst string `json:"dst"`
+		} `json:"trans_result"`
+		ErrorCode string `json:"error_code"`
+		ErrorMsg  string `json:"error_msg"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return "", err
+	}
+	if resp.ErrorCode != "" && resp.ErrorCode != "52000" {
+		return "", fmt.Errorf("baidu error %s: %s", resp.ErrorCode, resp.ErrorMsg)
+	}
+	var out strings.Builder
+	for _, tr := range resp.TransResult {
+		out.WriteString(tr.Dst)
+	}
+	if out.Len() == 0 {
+		return "", fmt.Errorf("no translation in response")
+	}
+	return out.String(), nil
+}
+
+// mapBaiduLang converts common target codes to Baidu language codes.
+func mapBaiduLang(target string) string {
+	switch strings.ToLower(target) {
+	case "zh-cn", "zh":
+		return "zh"
+	case "zh-tw":
+		return "cht"
+	default:
+		return target
+	}
+}
+
+// randomSalt returns a random numeric salt (Baidu accepts letters/digits).
+func randomSalt() string {
+	b := make([]byte, 4)
+	crand.Read(b)
+	return fmt.Sprintf("%d", binary.BigEndian.Uint32(b))
 }
 
 func translateGoogle(ctx context.Context, text, target, base string) (string, error) {
