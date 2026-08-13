@@ -101,6 +101,14 @@ func New(cfgStore *config.Store, manager *download.Manager, wsHandler *ws.Handle
 		h.ListTransfers(w, r)
 	})
 
+	mux.HandleFunc("/api/translate", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		h.TranslateText(w, r)
+	})
+
 	// Agent control channel + file pull endpoints
 	mux.HandleFunc("/agent/ws", hub.HandleWS)
 	mux.HandleFunc("/agent/files/", hub.ServeFile)

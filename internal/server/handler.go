@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"maps"
@@ -13,6 +14,7 @@ import (
 	"github.com/yuzl1/go-m3u8/internal/agent"
 	"github.com/yuzl1/go-m3u8/internal/config"
 	"github.com/yuzl1/go-m3u8/internal/download"
+	"github.com/yuzl1/go-m3u8/internal/translate"
 )
 
 // Handler holds dependencies for HTTP handlers.
@@ -78,24 +80,27 @@ func (h *Handler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, cfg)
 }
 
+// downloadReq is the /api/download request payload. JSON field names match
+// Cat-Catch replacement tags (userAgent, fullFileName, ...) so a POST body
+// template can use ${...} directly.
+type downloadReq struct {
+	URL          string            `json:"url"`
+	Title        string            `json:"title"`
+	Referer      string            `json:"referer"`
+	Cookie       string            `json:"cookie"`
+	UA           string            `json:"ua"`           // alias of userAgent
+	UserAgent    string            `json:"userAgent"`    // cat-catch tag ${userAgent}
+	FileName     string            `json:"fileName"`     // cat-catch tag ${fileName}, no extension
+	FullFileName string            `json:"fullFileName"` // cat-catch tag ${fullFileName}
+	BaseURL      string            `json:"base_url"`
+	SaveDir      string            `json:"save_dir"`
+	Headers      map[string]string `json:"headers"`
+}
+
 // Download triggers a new download task.
 // Supports both GET (query params) and POST (JSON body or form).
-// JSON field names match Cat-Catch replacement tags (userAgent,
-// fullFileName, ...) so a POST body template can use ${...} directly.
 func (h *Handler) Download(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		URL          string            `json:"url"`
-		Title        string            `json:"title"`
-		Referer      string            `json:"referer"`
-		Cookie       string            `json:"cookie"`
-		UA           string            `json:"ua"`           // alias of userAgent
-		UserAgent    string            `json:"userAgent"`    // cat-catch tag ${userAgent}
-		FileName     string            `json:"fileName"`     // cat-catch tag ${fileName}, no extension
-		FullFileName string            `json:"fullFileName"` // cat-catch tag ${fullFileName}
-		BaseURL      string            `json:"base_url"`
-		SaveDir      string            `json:"save_dir"`
-		Headers      map[string]string `json:"headers"`
-	}
+	var req downloadReq
 
 	switch r.Method {
 	case http.MethodGet:
@@ -160,22 +165,94 @@ func (h *Handler) Download(w http.ResponseWriter, r *http.Request) {
 	// Merge extra headers from JSON post.
 	maps.Copy(headers, req.Headers)
 
-	// Save name: prefer fileName/fullFileName tags, fall back to title.
-	saveName := req.Title
-	if req.FileName != "" {
-		saveName = req.FileName
-	} else if req.FullFileName != "" {
-		saveName = strings.TrimSuffix(req.FullFileName, filepath.Ext(req.FullFileName))
-	}
+	saveName := h.resolveSaveName(r, &req)
 
 	task := h.Manager.Submit(req.URL, saveName, headers, req.BaseURL, req.SaveDir)
-	log.Printf("New download task: id=%s url=%s title=%s", task.ID, task.URL, task.Title)
+	log.Printf("New download task: id=%s url=%s title=%q", task.ID, task.URL, task.Title)
 	writeJSON(w, http.StatusAccepted, task)
+}
+
+// resolveSaveName picks the filename source per config, strips site
+// suffixes ("Title | SiteName"), and optionally translates the result.
+func (h *Handler) resolveSaveName(r *http.Request, req *downloadReq) string {
+	cfg := h.Config.Get()
+
+	saveName := ""
+	switch cfg.FilenameSource {
+	case "title":
+		saveName = req.Title
+	case "fullFileName":
+		if req.FullFileName != "" {
+			saveName = strings.TrimSuffix(req.FullFileName, filepath.Ext(req.FullFileName))
+		} else if req.FileName != "" {
+			saveName = req.FileName
+		} else {
+			saveName = req.Title
+		}
+	default: // auto: prefer file name tags, fall back to title
+		saveName = req.Title
+		if req.FileName != "" {
+			saveName = req.FileName
+		} else if req.FullFileName != "" {
+			saveName = strings.TrimSuffix(req.FullFileName, filepath.Ext(req.FullFileName))
+		}
+	}
+
+	// "Title | SiteName" -> "Title" (cleaner filenames, better translation)
+	if i := strings.Index(saveName, "|"); i >= 0 {
+		saveName = strings.TrimSpace(saveName[:i])
+	}
+
+	// Optional filename translation (English -> Chinese etc.).
+	if cfg.TranslateEnabled && saveName != "" {
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+		if zh, err := translate.Translate(ctx, saveName, cfg.TranslateTarget, cfg.TranslateAPIURL); err == nil && zh != "" {
+			log.Printf("Translated filename %q -> %q", saveName, zh)
+			saveName = zh
+		} else {
+			log.Printf("Filename translation failed for %q: %v (using original)", saveName, err)
+		}
+	}
+
+	return saveName
 }
 
 // ListTasks returns all download tasks.
 func (h *Handler) ListTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.Manager.List())
+}
+
+// TranslateText tests the translation configuration:
+// GET /api/translate?text=...&target=...&api_url=...
+func (h *Handler) TranslateText(w http.ResponseWriter, r *http.Request) {
+	text := r.URL.Query().Get("text")
+	if text == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "text is required"})
+		return
+	}
+	cfg := h.Config.Get()
+	target := r.URL.Query().Get("target")
+	if target == "" {
+		target = cfg.TranslateTarget
+	}
+	apiURL := r.URL.Query().Get("api_url")
+	if apiURL == "" {
+		apiURL = cfg.TranslateAPIURL
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	zh, err := translate.Translate(ctx, text, target, apiURL)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"original":   text,
+		"translated": zh,
+		"target":     target,
+	})
 }
 
 // extractTaskID pulls the task ID from /api/tasks/<id>[/retry|/log].

@@ -31,6 +31,13 @@ type Config struct {
 	SyncAfterDownload bool   `json:"sync_after_download"` // create transfer after download done
 	DeleteAfterSync   bool   `json:"delete_after_sync"`   // delete local file after sync
 	SyncConnections   int    `json:"sync_connections"`    // parallel chunk connections for sync (1-16)
+
+	// Filename handling: which cat-catch field becomes the saved name,
+	// and optional translation of the filename (e.g. English -> Chinese).
+	FilenameSource   string `json:"filename_source"`   // auto | title | fullFileName
+	TranslateEnabled bool   `json:"translate_enabled"` // translate filename before saving
+	TranslateTarget  string `json:"translate_target"`  // target language, default zh-CN
+	TranslateAPIURL  string `json:"translate_api_url"` // custom API template with {text}, empty = Google free endpoint
 }
 
 // DefaultConfig returns sensible defaults.
@@ -53,6 +60,9 @@ func DefaultConfig() *Config {
 		SyncAfterDownload:  true,
 		DeleteAfterSync:    true,
 		SyncConnections:    4,
+		FilenameSource:     "auto",
+		TranslateEnabled:   false,
+		TranslateTarget:    "zh-CN",
 	}
 }
 
