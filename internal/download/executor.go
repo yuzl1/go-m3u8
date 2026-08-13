@@ -167,40 +167,56 @@ func Run(ctx context.Context, cfg *config.Config, task *Task, statusCh chan<- *T
 	// process — fully isolated from concurrent downloads.
 	proxy := ""
 	var session *ClashSession
-	if task.ClashStart != nil {
-		s, err := task.ClashStart()
-		if err == nil {
-			session = s
-			proxy = s.Proxy
-			task.ClashNode = s.Node
-		} else {
-			task.Log += fmt.Sprintf("clash instance failed: %v — falling back to shared clash proxy\n", err)
-			// Switch the sidecar to a HEALTHY node first — the shared
-			// proxy's current selection may be dead (SSL errors etc.).
-			if len(task.ClashNodes) > 0 {
-				c := clash.New(cfg.ClashAPI, cfg.ClashSecret)
-				node := task.ClashNodes[task.ProxyOffset%len(task.ClashNodes)]
-				if serr := c.SelectNode(task.ClashGroup, node); serr == nil {
-					task.Log += fmt.Sprintf("switched shared proxy to healthy node %q\n", node)
-					task.ClashNode = "共享:" + node
-				} else {
-					task.Log += fmt.Sprintf("shared proxy switch failed: %v\n", serr)
-					task.ClashNode = "共享代理(回退)"
-				}
-			} else {
-				task.ClashNode = "共享代理(回退)"
-			}
-			proxy = cfg.ClashProxy
-		}
-	}
 	defer func() {
 		if session != nil {
 			session.Release()
 		}
 	}()
 
+	// startClashSession launches a per-task instance on the next
+	// round-robin node; falls back to the shared sidecar (switched to a
+	// healthy node first) when that fails.
+	startClashSession := func() {
+		if task.ClashStart == nil {
+			return
+		}
+		s, err := task.ClashStart()
+		if err == nil {
+			session = s
+			proxy = s.Proxy
+			task.ClashNode = s.Node
+			return
+		}
+		task.Log += fmt.Sprintf("clash instance failed: %v — falling back to shared clash proxy\n", err)
+		if len(task.ClashNodes) > 0 {
+			c := clash.New(cfg.ClashAPI, cfg.ClashSecret)
+			node := task.ClashNodes[task.ProxyOffset%len(task.ClashNodes)]
+			if serr := c.SelectNode(task.ClashGroup, node); serr == nil {
+				task.Log += fmt.Sprintf("switched shared proxy to healthy node %q\n", node)
+				task.ClashNode = "共享:" + node
+			} else {
+				task.ClashNode = "共享代理(回退)"
+			}
+		} else {
+			task.ClashNode = "共享代理(回退)"
+		}
+		proxy = cfg.ClashProxy
+	}
+	startClashSession()
+
 	var lastErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {
+		// Rotate to a FRESH node + instance for retries: a node can pass
+		// the generic delay test yet still be dead for the target site.
+		// With per-task instances this is safe — it affects no other task.
+		if attempt > 1 && session != nil {
+			oldNode := session.Node
+			session.Release()
+			session = nil
+			task.Log += fmt.Sprintf("\n== Node rotation ==\nattempt %d: replacing node %q (previous attempt failed)\n", attempt, oldNode)
+			startClashSession()
+		}
+
 		_, args := BuildCommand(cfg, task, proxy)
 
 		// NOTE: += preserves any log content written before Run (e.g. the
