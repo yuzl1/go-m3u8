@@ -1042,6 +1042,9 @@ setInterval(() => {
 }, 15000);
 // Poll agents/transfers every 3s
 setInterval(refreshAgents, 3000);
+// Fallback reconcile: if the WebSocket is blocked (e.g. by a browser
+// proxy), the task list would freeze — refresh from REST every 5s.
+setInterval(loadInitialTasks, 5000);
 </script>
 </body>
 </html>

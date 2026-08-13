@@ -200,6 +200,11 @@ func Run(ctx context.Context, cfg *config.Config, task *Task, statusCh chan<- *T
 			notify(statusCh, task)
 		}
 
+		// Only inspect output produced by THIS attempt — the log
+		// accumulates across retries, and matching against historical
+		// failures would falsely fail a successful retry.
+		attemptLogStart := len(task.Log)
+
 		cmd := buildExec(ctx, exe, args)
 		err := runStreaming(cmd, task, statusCh)
 
@@ -213,8 +218,8 @@ func Run(ctx context.Context, cfg *config.Config, task *Task, statusCh chan<- *T
 
 		// N_m3u8DL-RE exits 0 on some fatal errors (e.g. segment count
 		// check failure) — detect them from the log.
-		if err == nil && checkLogForFailure(task.Log) {
-			err = fmt.Errorf("N_m3u8DL-RE logged fatal errors but exited 0:\n%s", tailLog(task.Log, 4000))
+		if err == nil && checkLogForFailure(task.Log[attemptLogStart:]) {
+			err = fmt.Errorf("N_m3u8DL-RE logged fatal errors but exited 0:\n%s", tailLog(task.Log[attemptLogStart:], 4000))
 		}
 
 		// Teaser-playlist guard: sites serve suspicious IPs (datacenter
