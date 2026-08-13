@@ -345,6 +345,7 @@ h2 {
 
 <div class="tabs">
   <button class="tab-btn active" data-tab="tab-downloads">📥 任务列表</button>
+  <button class="tab-btn" data-tab="tab-agents">🤖 Agent 管理</button>
   <button class="tab-btn" data-tab="tab-config">⚙️ 全局配置</button>
   <button class="tab-btn" data-tab="tab-quick">🔗 快速下载</button>
   <button class="tab-btn" data-tab="tab-catcatch">🐱 猫抓配置</button>
@@ -362,6 +363,29 @@ h2 {
       <button class="btn btn-ghost btn-sm" onclick="refreshFiles()">刷新</button>
     </div>
     <div id="file-list" style="font-size:13px;color:var(--text-secondary)">加载中...</div>
+  </div>
+</div>
+
+<!-- Agents Tab -->
+<div id="tab-agents" class="tab-content">
+  <div class="card">
+    <h2>Agent 节点 <span style="font-size:12px;color:var(--text-secondary);font-weight:normal" id="agent-count"></span></h2>
+    <div id="agent-list"></div>
+  </div>
+  <div class="card">
+    <h2>同步传输任务 <span style="font-size:12px;color:var(--text-secondary);font-weight:normal" id="transfer-count"></span></h2>
+    <div id="transfer-list"></div>
+  </div>
+  <div class="card">
+    <h2>Agent 接入信息</h2>
+    <p class="cat-catch-note">在 Agent 服务器上以 <code>-agent</code> 模式运行同一镜像，配置以下环境变量：</p>
+    <div class="cat-catch-code" id="agent-env-template">AGENT_SERVER=ws://localhost:5000/agent/ws
+AGENT_TOKEN=（下方 Token）
+AGENT_NAME=home-agent
+AGENT_DIR=/downloads</div>
+    <p class="cat-catch-note" style="margin-top:10px">共享 Token（复制到 Agent 的 AGENT_TOKEN）：</p>
+    <div class="cat-catch-code" id="agent-token" style="user-select:all">加载中...</div>
+    <p class="cat-catch-note">参考部署文件：仓库根目录 <code>docker-compose.agent.yml</code></p>
   </div>
 </div>
 
@@ -403,6 +427,13 @@ h2 {
         <label><input type="checkbox" name="del_after_done" checked> 完成删除临时文件</label>
         <label><input type="checkbox" name="concurrent" checked> 并发下载音视频字幕</label>
         <label><input type="checkbox" name="check_segments" checked> 合并前校验分片数</label>
+        <label><input type="checkbox" name="agent_enabled" checked> 接受 Agent 连接</label>
+        <label><input type="checkbox" name="sync_after_download" checked> 下载完成后同步到 Agent</label>
+        <label><input type="checkbox" name="delete_after_sync" checked> 同步完成后删除本地文件</label>
+      </div>
+      <div class="form-group" style="margin-bottom:12px">
+        <label>Agent 共享 Token（留空自动生成）</label>
+        <input name="agent_token" placeholder="自动生成">
       </div>
       <div class="form-group" style="margin-bottom:12px">
         <label>全局 Base URL</label>
@@ -571,6 +602,11 @@ async function loadConfig() {
       `http://localhost:${port}/api/download`;
     document.getElementById('catcatch-post-body').textContent =
       `{"url":"$\{url}","title":"$\{title}","referer":"$\{referer}","cookie":"$\{cookie}","userAgent":"$\{userAgent}","fullFileName":"$\{fullFileName}"}`;
+    // Agent tab: token + env template
+    const host = location.host;
+    document.getElementById('agent-token').textContent = cfg.agent_token || '未生成（保存配置后自动生成）';
+    document.getElementById('agent-env-template').textContent =
+      `AGENT_SERVER=ws://${host}/agent/ws\nAGENT_TOKEN=（上方 Token）\nAGENT_NAME=home-agent\nAGENT_DIR=/downloads`;
   } catch(e) { console.error('loadConfig', e); }
 }
 
@@ -753,6 +789,71 @@ function formatSize(bytes) {
   return bytes.toFixed(1) + ' ' + units[i];
 }
 
+// ---- Agents & Transfers ----
+let agents = [];
+let transfers = [];
+
+async function refreshAgents() {
+  try {
+    const [aRes, tRes] = await Promise.all([fetch('/api/agents'), fetch('/api/transfers')]);
+    agents = await aRes.json();
+    transfers = await tRes.json();
+    renderAgents();
+    renderTransfers();
+  } catch(e) { console.error('refreshAgents', e); }
+}
+
+function renderAgents() {
+  const el = document.getElementById('agent-list');
+  const count = document.getElementById('agent-count');
+  const online = agents.filter(a => a.online).length;
+  count.textContent = agents.length ? `在线 ${online}/${agents.length}` : '';
+  if (agents.length === 0) {
+    el.innerHTML = '<div class="empty-state">暂无 Agent 连接。在 Agent 服务器上用 <code>-agent</code> 模式部署同一镜像，配置 AGENT_SERVER / AGENT_TOKEN 后会自动接入。</div>';
+    return;
+  }
+  el.innerHTML = agents.map(a => `<div class="file-item">
+    <span>${a.online ? '🟢' : '⚫'}</span>
+    <span class="file-name" title="${esc(a.name)}">${esc(a.name)}</span>
+    ${a.active_transfer ? `<span style="font-size:12px;color:var(--primary)">传输中: ${esc(a.active_transfer)}</span>` : ''}
+    <span class="file-size">${esc(a.remote)}</span>
+    <span class="file-time">${formatTime(a.last_seen)}</span>
+  </div>`).join('');
+}
+
+function transferStatusText(s) {
+  const map = {waiting:'等待中',transferring:'传输中',done:'已同步',failed:'失败'};
+  return map[s] || s;
+}
+
+function renderTransfers() {
+  const el = document.getElementById('transfer-list');
+  const count = document.getElementById('transfer-count');
+  const active = transfers.filter(t => t.status === 'transferring').length;
+  const waiting = transfers.filter(t => t.status === 'waiting').length;
+  count.textContent = transfers.length ? `传输中 ${active} · 等待 ${waiting}` : '';
+  if (transfers.length === 0) {
+    el.innerHTML = '<div class="empty-state">暂无传输任务。下载完成后会自动创建同步任务。</div>';
+    return;
+  }
+  el.innerHTML = transfers.map(t => {
+    const pct = t.size > 0 ? Math.min(t.transferred / t.size * 100, 100) : 0;
+    const badgeClass = t.status === 'done' ? 'badge-done' : t.status === 'failed' ? 'badge-failed' : t.status === 'transferring' ? 'badge-downloading' : 'badge-pending';
+    return `<div class="file-item">
+      <span class="file-name" title="${esc(t.file_name)}">📦 ${esc(t.file_name)}</span>
+      <span class="badge ${badgeClass}">${transferStatusText(t.status)}</span>
+      ${(t.status === 'transferring' || t.status === 'waiting') ? `
+        <div style="flex:1;min-width:100px;height:6px;background:var(--bg);border-radius:999px;overflow:hidden">
+          <div style="height:100%;width:${pct}%;background:var(--primary);border-radius:999px;transition:width 0.4s"></div>
+        </div>
+        <span class="file-size">${formatSize(t.transferred)}/${formatSize(t.size)}</span>` : `<span class="file-size">${formatSize(t.size)}</span>`}
+      <span style="font-size:12px;color:var(--text-secondary)">→ ${esc(t.agent_name || '-')}</span>
+      <span class="file-time">${formatTime(t.created_at)}</span>
+      ${t.error ? `<span style="font-size:12px;color:var(--danger);width:100%">⚠ ${esc(t.error)}</span>` : ''}
+    </div>`;
+  }).reverse().join('');
+}
+
 // ---- WebSocket ----
 function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -780,11 +881,14 @@ loadConfig();
 loadInitialTasks();
 renderTasks();
 refreshFiles();
+refreshAgents();
 connectWS();
 // Refresh file list when a task reaches terminal state
 setInterval(() => {
   if (tasks.some(t => t.status === 'done' || t.status === 'failed')) refreshFiles();
 }, 15000);
+// Poll agents/transfers every 3s
+setInterval(refreshAgents, 3000);
 </script>
 </body>
 </html>

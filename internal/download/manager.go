@@ -27,6 +27,9 @@ type Manager struct {
 	cfgStore  *config.Store
 	tasksFile string // persisted task history, "" disables persistence
 
+	// onTaskDone is invoked after a download completes successfully.
+	onTaskDone func(*Task)
+
 	// Concurrency control: buffered channel as semaphore.
 	sem chan struct{}
 
@@ -113,6 +116,25 @@ func (m *Manager) applySem() {
 // RefreshSem updates the semaphore capacity from config.
 func (m *Manager) RefreshSem() {
 	m.applySem()
+}
+
+// SetOnTaskDone registers a callback invoked after a download succeeds.
+func (m *Manager) SetOnTaskDone(fn func(*Task)) {
+	m.onTaskDone = fn
+}
+
+// MarkSynced flags a task as transferred to an agent node.
+func (m *Manager) MarkSynced(id, agentName string) {
+	m.mu.Lock()
+	t := m.tasks[id]
+	m.mu.Unlock()
+	if t == nil {
+		return
+	}
+	t.Synced = true
+	t.SyncedTo = agentName
+	t.Progress = "已同步到 " + agentName
+	m.broadcast <- t
 }
 
 // Submit creates a new download task and enqueues it.
@@ -303,6 +325,8 @@ func (m *Manager) enqueue(task *Task) {
 
 	if err := <-done; err != nil {
 		log.Printf("Task %s failed: %v", task.ID, err)
+	} else if m.onTaskDone != nil {
+		go m.onTaskDone(task)
 	}
 }
 

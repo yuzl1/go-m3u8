@@ -1,0 +1,27 @@
+# Agent 节点部署文件 —— 用于没有公网 IP 的服务器（如家里 NAS）
+#
+# 部署步骤：
+#   1. 在主服务网页「🤖 Agent 管理」标签页查看共享 Token
+#   2. 把本文件和主服务镜像一起拷贝到 Agent 服务器
+#   3. 修改下面的 AGENT_SERVER 为主服务地址、AGENT_TOKEN 为共享 Token
+#   4. docker compose -f docker-compose.agent.yml up -d
+#
+# Agent 模式特点：
+#   - 所有连接由 Agent 主动拨出（主服务无法主动连 Agent）
+#   - 下载在主服务完成后，主服务自动推送传输任务
+#   - Agent 通过 HTTP 从主服务拉取文件并保存到 AGENT_DIR
+#   - 同步完成后主服务删除本地文件以释放硬盘
+services:
+  go-m3u8-agent:
+    # 主服务构建的镜像名；跨机器部署时可导出: docker save | docker load
+    image: go-m3u8-go-m3u8
+    container_name: go-m3u8-agent
+    command: ["go-m3u8", "-agent"]
+    environment:
+      - AGENT_SERVER=ws://主服务器IP:5000/agent/ws
+      - AGENT_TOKEN=替换为主服务页面显示的Token
+      - AGENT_NAME=home-agent
+      - AGENT_DIR=/downloads
+    volumes:
+      - ./downloads:/downloads
+    restart: unless-stopped

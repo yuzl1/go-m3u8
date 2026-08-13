@@ -30,6 +30,8 @@ type Task struct {
 	TotalSegments int               `json:"total_segments,omitempty"`
 	DoneSegments  int               `json:"done_segments,omitempty"`
 	OutputFile    string            `json:"output_file,omitempty"`
+	Synced        bool              `json:"synced,omitempty"`
+	SyncedTo      string            `json:"synced_to,omitempty"`
 	Error         string            `json:"error,omitempty"`
 	CreatedAt     time.Time         `json:"created_at"`
 	Headers       map[string]string `json:"headers,omitempty"`

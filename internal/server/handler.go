@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/yuzl1/go-m3u8/internal/agent"
 	"github.com/yuzl1/go-m3u8/internal/config"
 	"github.com/yuzl1/go-m3u8/internal/download"
 )
@@ -18,7 +19,18 @@ import (
 type Handler struct {
 	Manager  *download.Manager
 	Config   *config.Store
+	AgentHub *agent.Hub
 	Template []byte // embedded HTML template
+}
+
+// ListAgents returns connected agents.
+func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, h.AgentHub.Agents())
+}
+
+// ListTransfers returns all sync transfers.
+func (h *Handler) ListTransfers(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, h.AgentHub.Transfers())
 }
 
 // Index serves the main web page.
@@ -54,6 +66,10 @@ func (h *Handler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
 	if cfg.Nm3u8dlPath == "" {
 		cfg.Nm3u8dlPath = "N_m3u8DL-RE"
 	}
+	// Empty token in the form means "keep the current one".
+	if cfg.AgentToken == "" {
+		cfg.AgentToken = h.Config.Get().AgentToken
+	}
 	if err := h.Config.Update(&cfg); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -72,8 +88,8 @@ func (h *Handler) Download(w http.ResponseWriter, r *http.Request) {
 		Title        string            `json:"title"`
 		Referer      string            `json:"referer"`
 		Cookie       string            `json:"cookie"`
-		UA           string            `json:"ua"`        // alias of userAgent
-		UserAgent    string            `json:"userAgent"` // cat-catch tag ${userAgent}
+		UA           string            `json:"ua"`           // alias of userAgent
+		UserAgent    string            `json:"userAgent"`    // cat-catch tag ${userAgent}
 		FileName     string            `json:"fileName"`     // cat-catch tag ${fileName}, no extension
 		FullFileName string            `json:"fullFileName"` // cat-catch tag ${fullFileName}
 		BaseURL      string            `json:"base_url"`

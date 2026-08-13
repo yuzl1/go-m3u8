@@ -23,6 +23,13 @@ type Config struct {
 	BaseURL            string            `json:"base_url"`
 	Nm3u8dlPath        string            `json:"nm3u8dl_path"`
 	Port               int               `json:"port"`
+
+	// Agent sync: after download completes, the file is transferred to a
+	// connected agent node and (optionally) deleted locally to save disk.
+	AgentEnabled      bool   `json:"agent_enabled"`       // accept agent connections
+	AgentToken        string `json:"agent_token"`         // shared secret, auto-generated if empty
+	SyncAfterDownload bool   `json:"sync_after_download"` // create transfer after download done
+	DeleteAfterSync   bool   `json:"delete_after_sync"`   // delete local file after sync
 }
 
 // DefaultConfig returns sensible defaults.
@@ -41,6 +48,9 @@ func DefaultConfig() *Config {
 		BaseURL:            "",
 		Nm3u8dlPath:        "N_m3u8DL-RE",
 		Port:               8080,
+		AgentEnabled:       true,
+		SyncAfterDownload:  true,
+		DeleteAfterSync:    true,
 	}
 }
 

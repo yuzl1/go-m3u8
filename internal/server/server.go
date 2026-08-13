@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/yuzl1/go-m3u8/internal/agent"
 	"github.com/yuzl1/go-m3u8/internal/config"
 	"github.com/yuzl1/go-m3u8/internal/download"
 	"github.com/yuzl1/go-m3u8/internal/ws"
@@ -20,10 +21,11 @@ type Server struct {
 }
 
 // New creates a new Server.
-func New(cfgStore *config.Store, manager *download.Manager, wsHandler *ws.Handler, template []byte) *Server {
+func New(cfgStore *config.Store, manager *download.Manager, wsHandler *ws.Handler, hub *agent.Hub, template []byte) *Server {
 	h := &Handler{
 		Manager:  manager,
 		Config:   cfgStore,
+		AgentHub: hub,
 		Template: template,
 	}
 
@@ -82,6 +84,26 @@ func New(cfgStore *config.Store, manager *download.Manager, wsHandler *ws.Handle
 		}
 		h.ListFiles(w, r)
 	})
+
+	mux.HandleFunc("/api/agents", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		h.ListAgents(w, r)
+	})
+
+	mux.HandleFunc("/api/transfers", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		h.ListTransfers(w, r)
+	})
+
+	// Agent control channel + file pull endpoints
+	mux.HandleFunc("/agent/ws", hub.HandleWS)
+	mux.HandleFunc("/agent/files/", hub.ServeFile)
 
 	// WebSocket
 	mux.Handle("/ws", wsHandler)
