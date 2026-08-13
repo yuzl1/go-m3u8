@@ -16,3 +16,4 @@ go-m3u8
 # Screenshots
 *.png
 *.jpg
+.DS_Store
