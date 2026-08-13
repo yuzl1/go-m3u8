@@ -46,9 +46,13 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.Config.Get())
 }
 
-// UpdateConfig replaces the entire configuration.
+// UpdateConfig merges the request into the existing configuration:
+// fields ABSENT from the request keep their current values. This matters
+// because a stale cached web page may submit a form without newer fields
+// — a full replace would silently wipe them (e.g. translate_enabled).
 func (h *Handler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
-	var cfg config.Config
+	old := h.Config.Get()
+	cfg := *old // start from current values, overlay only present fields
 	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
