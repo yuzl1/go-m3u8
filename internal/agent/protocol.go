@@ -17,9 +17,10 @@ type Message struct {
 
 // TransferInfo describes a file the agent must pull.
 type TransferInfo struct {
-	ID       string `json:"id"`
-	FileName string `json:"file_name"`
-	Size     int64  `json:"size"`
+	ID          string `json:"id"`
+	FileName    string `json:"file_name"`
+	Size        int64  `json:"size"`
+	Connections int    `json:"connections"` // parallel chunk connections to use
 }
 
 // Agent represents a connected agent node.

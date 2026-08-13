@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/yuzl1/go-m3u8/internal/agent"
 	"github.com/yuzl1/go-m3u8/internal/config"
@@ -13,6 +14,12 @@ import (
 	"github.com/yuzl1/go-m3u8/internal/server"
 	"github.com/yuzl1/go-m3u8/internal/ws"
 )
+
+// envInt reads an int env var, returning 0 when unset/invalid.
+func envInt(key string) int {
+	n, _ := strconv.Atoi(os.Getenv(key))
+	return n
+}
 
 //go:embed web/templates/index.html
 var templateFS embed.FS
@@ -25,10 +32,11 @@ func main() {
 
 	if *agentMode {
 		agent.RunClient(agent.ClientConfig{
-			Server: os.Getenv("AGENT_SERVER"),
-			Token:  os.Getenv("AGENT_TOKEN"),
-			Name:   os.Getenv("AGENT_NAME"),
-			Dir:    os.Getenv("AGENT_DIR"),
+			Server:      os.Getenv("AGENT_SERVER"),
+			Token:       os.Getenv("AGENT_TOKEN"),
+			Name:        os.Getenv("AGENT_NAME"),
+			Dir:         os.Getenv("AGENT_DIR"),
+			Connections: envInt("AGENT_CONNECTIONS"),
 		})
 		return
 	}

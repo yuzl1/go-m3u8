@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -214,28 +213,36 @@ func (h *Hub) ServeFile(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Disposition", `attachment; filename="`+t.FileName+`"`)
 	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Length", strconv.FormatInt(t.Size, 10))
 
-	// Stream to the client while counting bytes for progress display.
-	counter := &progressWriter{hub: h, transferID: id}
-	if _, err := io.Copy(io.MultiWriter(w, counter), f); err != nil {
-		log.Printf("Transfer %s stream error: %v", id, err)
-	}
+	// ServeContent supports HTTP Range requests — the agent pulls the file
+	// in parallel chunks over multiple connections for speed. Bytes read
+	// are counted so the UI can show progress.
+	counter := &countingReadSeeker{rs: f, hub: h, transferID: id}
+	http.ServeContent(w, r, t.FileName, t.CreatedAt, counter)
 }
 
-// progressWriter updates the transfer's byte count as data flows.
-type progressWriter struct {
+// countingReadSeeker wraps a ReadSeeker and updates the transfer's byte
+// count as data is read (works with ServeContent incl. Range requests).
+type countingReadSeeker struct {
+	rs         io.ReadSeeker
 	hub        *Hub
 	transferID string
 }
 
-func (p *progressWriter) Write(b []byte) (int, error) {
-	p.hub.mu.Lock()
-	if t := p.hub.transfers[p.transferID]; t != nil {
-		t.Transferred += int64(len(b))
+func (c *countingReadSeeker) Read(p []byte) (int, error) {
+	n, err := c.rs.Read(p)
+	if n > 0 {
+		c.hub.mu.Lock()
+		if t := c.hub.transfers[c.transferID]; t != nil {
+			t.Transferred += int64(n)
+		}
+		c.hub.mu.Unlock()
 	}
-	p.hub.mu.Unlock()
-	return len(b), nil
+	return n, err
+}
+
+func (c *countingReadSeeker) Seek(offset int64, whence int) (int64, error) {
+	return c.rs.Seek(offset, whence)
 }
 
 func (h *Hub) pingLoop(a *Agent, conn *websocket.Conn, stop chan struct{}) {
@@ -339,6 +346,16 @@ func (h *Hub) clearActive(a *Agent) {
 	h.mu.Unlock()
 }
 
+// syncConnections returns the configured number of parallel chunk
+// connections for sync transfers.
+func (h *Hub) syncConnections() int {
+	n := h.cfgStore.Get().SyncConnections
+	if n < 1 || n > 16 {
+		return 4
+	}
+	return n
+}
+
 // assign tries to give a transfer to an idle online agent.
 func (h *Hub) assign(t *Transfer) bool {
 	// Sanity: file must still exist.
@@ -358,7 +375,12 @@ func (h *Hub) assign(t *Transfer) bool {
 		t.AgentName = a.Name
 		t.Status = "transferring"
 		t.Attempts++
-		msg := &Message{Type: "assign", Transfer: &TransferInfo{ID: t.ID, FileName: t.FileName, Size: t.Size}}
+		msg := &Message{Type: "assign", Transfer: &TransferInfo{
+			ID:          t.ID,
+			FileName:    t.FileName,
+			Size:        t.Size,
+			Connections: h.syncConnections(),
+		}}
 		conn := h.agentConns[a.ID]
 		h.mu.Unlock()
 

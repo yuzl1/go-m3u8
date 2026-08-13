@@ -30,6 +30,7 @@ type Config struct {
 	AgentToken        string `json:"agent_token"`         // shared secret, auto-generated if empty
 	SyncAfterDownload bool   `json:"sync_after_download"` // create transfer after download done
 	DeleteAfterSync   bool   `json:"delete_after_sync"`   // delete local file after sync
+	SyncConnections   int    `json:"sync_connections"`    // parallel chunk connections for sync (1-16)
 }
 
 // DefaultConfig returns sensible defaults.
@@ -51,6 +52,7 @@ func DefaultConfig() *Config {
 		AgentEnabled:       true,
 		SyncAfterDownload:  true,
 		DeleteAfterSync:    true,
+		SyncConnections:    4,
 	}
 }
 
