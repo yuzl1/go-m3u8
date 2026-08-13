@@ -330,6 +330,30 @@ func (m *Manager) clashHealthyNodes(cfg *config.Config) ([]string, string, error
 			healthy = append(healthy, n)
 		}
 	}
+
+	// The delay test also reports proxy-GROUP members (e.g. "自动选择"
+	// url-test groups) — those cannot be used as a node. Keep only REAL
+	// proxy names from the config.
+	if proxyNames, perr := clash.ParseProxyNames(cfg.ClashYAML); perr == nil && len(proxyNames) > 0 {
+		valid := make(map[string]bool, len(proxyNames))
+		for _, n := range proxyNames {
+			valid[n] = true
+		}
+		filtered := make([]string, 0, len(healthy))
+		for _, n := range healthy {
+			if valid[n] {
+				filtered = append(filtered, n)
+			}
+		}
+		if len(filtered) > 0 {
+			healthy = filtered
+		} else {
+			// Nothing real survived the delay filter — fall back to all
+			// real nodes (health unknown) rather than failing outright.
+			healthy = proxyNames
+		}
+	}
+
 	if len(healthy) == 0 {
 		// Nothing passed the test; keep all nodes rather than failing
 		// (the test itself may have been blocked).

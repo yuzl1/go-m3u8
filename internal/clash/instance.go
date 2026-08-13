@@ -45,6 +45,36 @@ func ExtractNode(yamlText, nodeName string) (string, error) {
 	return "", fmt.Errorf("node %q not found in clash config", nodeName)
 }
 
+// ParseProxyNames extracts the names of all entries in the `proxies:`
+// section of a clash config — the REAL nodes, excluding proxy-groups.
+func ParseProxyNames(yamlText string) ([]string, error) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(yamlText), &doc); err != nil {
+		return nil, fmt.Errorf("parse clash yaml: %w", err)
+	}
+	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("invalid clash config")
+	}
+	root := doc.Content[0]
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		if root.Content[i].Value != "proxies" {
+			continue
+		}
+		seq := root.Content[i+1]
+		if seq.Kind != yaml.SequenceNode {
+			return nil, fmt.Errorf("clash proxies section is not a list")
+		}
+		names := make([]string, 0, len(seq.Content))
+		for _, item := range seq.Content {
+			if n := mappingValue(item, "name"); n != "" {
+				names = append(names, n)
+			}
+		}
+		return names, nil
+	}
+	return nil, fmt.Errorf("no proxies section found in clash config")
+}
+
 func mappingValue(node *yaml.Node, key string) string {
 	if node == nil || node.Kind != yaml.MappingNode {
 		return ""

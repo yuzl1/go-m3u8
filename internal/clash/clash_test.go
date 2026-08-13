@@ -173,6 +173,33 @@ func TestExtractNode(t *testing.T) {
 	}
 }
 
+func TestParseProxyNames(t *testing.T) {
+	yaml := `proxies:
+  - name: 节点A
+    type: ss
+    server: a.com
+    port: 1
+    cipher: aes-128-gcm
+    password: p
+  - name: 节点B
+    type: trojan
+    server: b.com
+    port: 443
+    password: p
+proxy-groups:
+  - name: 自动选择
+    type: url-test
+    proxies: [节点A, 节点B]
+`
+	names, err := ParseProxyNames(yaml)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 2 || names[0] != "节点A" || names[1] != "节点B" {
+		t.Fatalf("names = %v", names)
+	}
+}
+
 func TestBuildInstanceConfig(t *testing.T) {
 	block := "name: 香港 IEPL 01\ntype: ss\nserver: hk1.example.com\nport: 8388"
 	cfg := BuildInstanceConfig("香港 IEPL 01", block, 7910)
