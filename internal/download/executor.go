@@ -175,6 +175,7 @@ func Run(ctx context.Context, cfg *config.Config, task *Task, statusCh chan<- *T
 		} else {
 			task.Log += fmt.Sprintf("clash instance failed: %v — falling back to shared clash proxy\n", err)
 			proxy = cfg.ClashProxy
+			task.ClashNode = "共享代理(回退)"
 		}
 	}
 	defer func() {
