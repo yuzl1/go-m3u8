@@ -422,6 +422,10 @@ AGENT_DIR=/downloads</div>
           <input name="sync_connections" type="number" value="4" min="1" max="16">
         </div>
         <div class="form-group">
+          <label>最少分片数守卫（分片少于该值=预览/无效播放列表，任务失败并换节点重试；0=关闭）</label>
+          <input name="min_segments" type="number" value="0" min="0" max="99999" title="网站对连不上的节点会返回只有几十秒的尝鲜播放列表（如10个分片），设50可拦截">
+        </div>
+        <div class="form-group">
           <label>N_m3u8DL-RE 路径</label>
           <input name="nm3u8dl_path" placeholder="N_m3u8DL-RE">
         </div>
@@ -714,6 +718,7 @@ function collectConfig() {
   data.download_retry_count = parseInt(data.download_retry_count) || 5;
   data.max_concurrent = parseInt(data.max_concurrent) || 3;
   data.sync_connections = parseInt(data.sync_connections) || 4;
+  data.min_segments = parseInt(data.min_segments) || 0;
   data.port = parseInt(data.port) || 8080;
   return data;
 }
