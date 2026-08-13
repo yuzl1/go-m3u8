@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -66,6 +67,8 @@ func RunClient(cfg ClientConfig) {
 }
 
 // runOnce maintains a single control-channel session until it drops.
+// In-flight pulls are awaited before the session returns so a reconnect
+// session never races with leftovers from the previous one.
 func runOnce(cfg ClientConfig, httpBase string) error {
 	wsURL := cfg.Server + "?token=" + url.QueryEscape(cfg.Token) + "&name=" + url.QueryEscape(cfg.Name)
 	conn, err := websocket.Dial(wsURL, "", "http://localhost/")
@@ -74,6 +77,9 @@ func runOnce(cfg ClientConfig, httpBase string) error {
 	}
 	defer conn.Close()
 	log.Printf("Agent %q connected to %s, saving to %s", cfg.Name, cfg.Server, cfg.Dir)
+
+	var wg sync.WaitGroup
+	defer wg.Wait() // wait for in-flight pulls before reconnecting
 
 	for {
 		var msg Message
@@ -87,7 +93,7 @@ func runOnce(cfg ClientConfig, httpBase string) error {
 				continue
 			}
 			log.Printf("Received transfer %s: %s (%d bytes)", info.ID, info.FileName, info.Size)
-			go func() {
+			wg.Go(func() {
 				err := pullFile(httpBase, cfg, info)
 				reply := &Message{Type: "done", TransferID: info.ID}
 				if err != nil {
@@ -99,7 +105,7 @@ func runOnce(cfg ClientConfig, httpBase string) error {
 				if serr := websocket.JSON.Send(conn, reply); serr != nil {
 					log.Printf("Failed to report transfer %s: %v", info.ID, serr)
 				}
-			}()
+			})
 		case "ping":
 			if err := websocket.JSON.Send(conn, &Message{Type: "pong"}); err != nil {
 				return err
@@ -111,9 +117,25 @@ func runOnce(cfg ClientConfig, httpBase string) error {
 // copyBufSize is the buffer used when streaming file data.
 const copyBufSize = 256 * 1024
 
+// chunkManifest records which parts of a .part file are complete, enabling
+// resume across retries and reconnections. Stored as <file>.part.json.
+type chunkManifest struct {
+	TransferID string        `json:"transfer_id"`
+	Size       int64         `json:"size"`
+	Single     bool          `json:"single"` // sequential single-connection download
+	Chunks     []chunkStatus `json:"chunks"`
+}
+
+type chunkStatus struct {
+	Start int64 `json:"start"`
+	End   int64 `json:"end"`
+	Done  bool  `json:"done"`
+}
+
 // pullFile downloads a transfer from the main server to the local dir.
 // Uses parallel chunked (HTTP Range) downloads when possible — much
-// faster than a single connection over high-latency links.
+// faster than a single connection over high-latency links. Failed
+// attempts keep partial data (chunk manifest) and resume on retry.
 func pullFile(httpBase string, cfg ClientConfig, info *TransferInfo) error {
 	conns := cfg.Connections
 	if conns <= 0 {
@@ -124,7 +146,9 @@ func pullFile(httpBase string, cfg ClientConfig, info *TransferInfo) error {
 	}
 	if err := pullMulti(httpBase, cfg, info, conns); err != nil {
 		if strings.Contains(err.Error(), "server ignored range") {
-			// Server doesn't support ranged pulls; fall back.
+			// Server doesn't support ranged pulls; start single from zero.
+			os.Remove(filepath.Join(cfg.Dir, info.FileName+".part"))
+			os.Remove(filepath.Join(cfg.Dir, info.FileName+".part.json"))
 			return pullSingle(httpBase, cfg, info)
 		}
 		return err
@@ -132,79 +156,187 @@ func pullFile(httpBase string, cfg ClientConfig, info *TransferInfo) error {
 	return nil
 }
 
-// pullSingle downloads the whole file over one connection.
+// loadManifest reads a chunk manifest; nil when absent or corrupt.
+func loadManifest(path string) *chunkManifest {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var m chunkManifest
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil
+	}
+	return &m
+}
+
+// saveManifest writes the manifest atomically (tmp + rename).
+func saveManifest(path string, m *chunkManifest) {
+	data, err := json.Marshal(m)
+	if err != nil {
+		return
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return
+	}
+	os.Rename(tmp, path)
+}
+
+// pullSingle downloads the whole file over one connection, resuming from
+// the valid prefix of a previous attempt when the manifest allows.
 func pullSingle(httpBase string, cfg ClientConfig, info *TransferInfo) error {
+	part := filepath.Join(cfg.Dir, info.FileName+".part")
+	final := filepath.Join(cfg.Dir, info.FileName)
+	manifestPath := part + ".json"
+
+	// Resume: only trust a manifest recorded by a previous single-connection
+	// attempt for the same transfer — the file is sequential then.
+	offset := int64(0)
+	if m := loadManifest(manifestPath); m != nil && m.TransferID == info.ID && m.Size == info.Size && m.Single {
+		if st, err := os.Stat(part); err == nil {
+			if st.Size() == info.Size {
+				// Already complete from a previous attempt.
+				os.Remove(manifestPath)
+				if err := os.Rename(part, final); err != nil {
+					return err
+				}
+				return nil
+			}
+			if st.Size() > 0 && st.Size() < info.Size {
+				offset = st.Size()
+				log.Printf("Transfer %s: resuming from byte %d/%d", info.ID, offset, info.Size)
+			}
+		}
+	} else {
+		os.Remove(part)
+	}
+
 	fileURL := httpBase + "/agent/files/" + info.ID + "?token=" + url.QueryEscape(cfg.Token)
-	resp, err := http.Get(fileURL)
+	var resp *http.Response
+	var err error
+	if offset > 0 {
+		req, reqErr := http.NewRequest(http.MethodGet, fileURL, nil)
+		if reqErr != nil {
+			return reqErr
+		}
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", offset))
+		resp, err = http.DefaultClient.Do(req)
+		if err == nil && resp.StatusCode != http.StatusPartialContent {
+			resp.Body.Close()
+			return fmt.Errorf("HTTP %d (range not supported)", resp.StatusCode)
+		}
+	} else {
+		resp, err = http.Get(fileURL)
+	}
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
-	part := filepath.Join(cfg.Dir, info.FileName+".part")
-	final := filepath.Join(cfg.Dir, info.FileName)
-	out, err := os.Create(part)
+	flags := os.O_CREATE | os.O_WRONLY
+	if offset > 0 {
+		flags |= os.O_APPEND
+	} else {
+		flags |= os.O_TRUNC
+	}
+	out, err := os.OpenFile(part, flags, 0644)
 	if err != nil {
 		return err
 	}
-	n, err := io.CopyBuffer(out, resp.Body, make([]byte, copyBufSize))
-	cerr := out.Close()
-	if err != nil {
-		os.Remove(part)
-		return err
+	_, cerr := io.CopyBuffer(out, resp.Body, make([]byte, copyBufSize))
+	closeErr := out.Close()
+	if cerr != nil || closeErr != nil {
+		// Keep the valid prefix + manifest so the next attempt resumes.
+		saveManifest(manifestPath, &chunkManifest{TransferID: info.ID, Size: info.Size, Single: true})
+		if cerr != nil {
+			return cerr
+		}
+		return closeErr
 	}
-	if cerr != nil {
-		os.Remove(part)
-		return cerr
+
+	st, statErr := os.Stat(part)
+	if statErr != nil || st.Size() != info.Size {
+		saveManifest(manifestPath, &chunkManifest{TransferID: info.ID, Size: info.Size, Single: true})
+		return fmt.Errorf("size mismatch: want %d", info.Size)
 	}
-	if info.Size > 0 && n != info.Size {
-		os.Remove(part)
-		return fmt.Errorf("size mismatch: got %d bytes, want %d", n, info.Size)
-	}
+	os.Remove(manifestPath)
 	if err := os.Rename(part, final); err != nil {
 		return err
 	}
 	return nil
 }
 
-// pullMulti downloads the file in parallel chunks over N connections.
+// pullMulti downloads the file in parallel chunks over N connections,
+// resuming chunks already completed in a previous attempt.
 func pullMulti(httpBase string, cfg ClientConfig, info *TransferInfo, conns int) error {
 	part := filepath.Join(cfg.Dir, info.FileName+".part")
 	final := filepath.Join(cfg.Dir, info.FileName)
+	manifestPath := part + ".json"
+
+	chunk := (info.Size + int64(conns) - 1) / int64(conns)
+	chunks := make([]chunkStatus, 0, conns)
+	for i := range conns {
+		start := int64(i) * chunk
+		if start >= info.Size {
+			break
+		}
+		end := min(start+chunk-1, info.Size-1)
+		chunks = append(chunks, chunkStatus{Start: start, End: end})
+	}
+
+	// Resume: mark chunks already complete in a previous attempt.
+	if m := loadManifest(manifestPath); m != nil && m.TransferID == info.ID && m.Size == info.Size && !m.Single {
+		done := 0
+		for i := range chunks {
+			for _, c := range m.Chunks {
+				if c.Done && c.Start == chunks[i].Start && c.End == chunks[i].End {
+					chunks[i].Done = true
+					done++
+					break
+				}
+			}
+		}
+		if done > 0 {
+			log.Printf("Transfer %s: resuming, %d/%d chunks already complete", info.ID, done, len(chunks))
+		}
+	}
 
 	out, err := os.OpenFile(part, os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
 	}
 	// Pre-allocate so chunks can write at their offsets concurrently.
+	// (Truncating to the same size preserves already-written data.)
 	if err := out.Truncate(info.Size); err != nil {
 		out.Close()
 		os.Remove(part)
+		os.Remove(manifestPath)
 		return err
 	}
 
-	chunk := (info.Size + int64(conns) - 1) / int64(conns)
+	var mu sync.Mutex
 	errs := make(chan error, conns)
 	var wg sync.WaitGroup
-	for i := range conns {
-		start := int64(i) * chunk
-		if start >= info.Size {
-			break
-		}
-		end := start + chunk - 1
-		if end >= info.Size {
-			end = info.Size - 1
+	for i := range chunks {
+		if chunks[i].Done {
+			continue
 		}
 		wg.Add(1)
-		go func(start, end int64) {
+		go func(idx int) {
 			defer wg.Done()
-			if err := pullChunk(httpBase, cfg, info, out, start, end); err != nil {
-				errs <- fmt.Errorf("chunk %d-%d: %w", start, end, err)
+			c := &chunks[idx]
+			if err := pullChunk(httpBase, cfg, info, out, c.Start, c.End); err != nil {
+				errs <- fmt.Errorf("chunk %d-%d: %w", c.Start, c.End, err)
+				return
 			}
-		}(start, end)
+			c.Done = true
+			mu.Lock()
+			saveManifest(manifestPath, &chunkManifest{TransferID: info.ID, Size: info.Size, Chunks: chunks})
+			mu.Unlock()
+		}(i)
 	}
 	wg.Wait()
 	close(errs)
@@ -216,20 +348,19 @@ func pullMulti(httpBase string, cfg ClientConfig, info *TransferInfo, conns int)
 		}
 	}
 	if firstErr != nil {
+		// Keep .part + manifest so the next attempt resumes.
 		out.Close()
-		os.Remove(part)
 		return firstErr
 	}
 	if err := out.Close(); err != nil {
-		os.Remove(part)
 		return err
 	}
 
 	// Full size sanity check before publishing the file.
 	if st, err := os.Stat(part); err != nil || st.Size() != info.Size {
-		os.Remove(part)
 		return fmt.Errorf("size mismatch: want %d", info.Size)
 	}
+	os.Remove(manifestPath)
 	if err := os.Rename(part, final); err != nil {
 		return err
 	}
