@@ -439,7 +439,7 @@ AGENT_DIR=/downloads</div>
         <div class="form-group">
           <label>文件名来源（猫抓传的字段）</label>
           <select name="filename_source">
-            <option value="auto">自动（优先文件原名，其次标题）</option>
+            <option value="auto">自动（翻译开启时用标题；否则优先文件原名）</option>
             <option value="title">页面标题 (title)</option>
             <option value="fullFileName">完整文件名 (fullFileName)</option>
           </select>
@@ -638,8 +638,8 @@ async function loadConfig() {
   } catch(e) { console.error('loadConfig', e); }
 }
 
-configForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
+// collectConfig gathers current form values into the config payload.
+function collectConfig() {
   const data = {};
   for (const el of configForm.elements) {
     if (!el.name) continue;
@@ -656,9 +656,22 @@ configForm.addEventListener('submit', async (e) => {
   data.max_concurrent = parseInt(data.max_concurrent) || 3;
   data.sync_connections = parseInt(data.sync_connections) || 4;
   data.port = parseInt(data.port) || 8080;
+  return data;
+}
 
+async function saveConfig() {
+  const res = await fetch('/api/config', {
+    method: 'PUT',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(collectConfig()),
+  });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+}
+
+configForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
   try {
-    await fetch('/api/config', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data) });
+    await saveConfig();
     configSaved.style.display = 'inline';
     setTimeout(() => configSaved.style.display = 'none', 2000);
   } catch(err) { alert('保存失败: ' + err.message); }
@@ -756,17 +769,17 @@ async function testTranslate() {
   const text = prompt('输入要翻译的英文文件名（测试用）', 'Date with a Flight Attendant');
   if (!text) return;
   try {
-    const target = configForm.elements['translate_target'].value || 'zh-CN';
-    const apiUrl = configForm.elements['translate_api_url'].value || '';
-    const res = await fetch('/api/translate?text=' + encodeURIComponent(text)
-      + '&target=' + encodeURIComponent(target)
-      + '&api_url=' + encodeURIComponent(apiUrl));
+    // 先保存当前表单配置，保证测试的就是下载实际使用的配置
+    await saveConfig();
+    configSaved.style.display = 'inline';
+    setTimeout(() => configSaved.style.display = 'none', 2000);
+    const res = await fetch('/api/translate?text=' + encodeURIComponent(text));
     const data = await res.json();
     if (!res.ok) {
       showModal('翻译测试失败', data.error || ('HTTP ' + res.status));
       return;
     }
-    showModal('翻译测试', data.original + '\n\n→ ' + data.translated);
+    showModal('翻译测试', data.original + '\n\n→ ' + data.translated + '\n\n（配置已保存）');
   } catch(e) {
     showModal('翻译测试失败', e.message);
   }

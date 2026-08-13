@@ -189,12 +189,18 @@ func (h *Handler) resolveSaveName(r *http.Request, req *downloadReq) string {
 		} else {
 			saveName = req.Title
 		}
-	default: // auto: prefer file name tags, fall back to title
-		saveName = req.Title
-		if req.FileName != "" {
-			saveName = req.FileName
-		} else if req.FullFileName != "" {
-			saveName = strings.TrimSuffix(req.FullFileName, filepath.Ext(req.FullFileName))
+	default: // auto: prefer file name tags, fall back to title.
+		// BUT when translation is enabled, the title is the human-readable
+		// text worth translating — technical file names are not.
+		if cfg.TranslateEnabled && req.Title != "" {
+			saveName = req.Title
+		} else {
+			saveName = req.Title
+			if req.FileName != "" {
+				saveName = req.FileName
+			} else if req.FullFileName != "" {
+				saveName = strings.TrimSuffix(req.FullFileName, filepath.Ext(req.FullFileName))
+			}
 		}
 	}
 
