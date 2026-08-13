@@ -100,7 +100,7 @@ func TestPullMultiSkipsDoneChunks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := pullMulti(ts.URL, cfg, info, conns); err != nil {
+	if err := pullMulti(ts.URL, cfg, info, conns, http.DefaultClient); err != nil {
 		t.Fatalf("pullMulti: %v", err)
 	}
 
@@ -149,7 +149,7 @@ func TestPullMultiResumeAfterFailure(t *testing.T) {
 	srv.mu.Unlock()
 
 	// Attempt 1: chunk 2 fails after 3 retries -> error, partial kept.
-	if err := pullMulti(ts.URL, cfg, info, conns); err == nil {
+	if err := pullMulti(ts.URL, cfg, info, conns, http.DefaultClient); err == nil {
 		t.Fatal("expected first attempt to fail")
 	}
 	part := filepath.Join(dir, "g.mp4.part")
@@ -175,7 +175,7 @@ func TestPullMultiResumeAfterFailure(t *testing.T) {
 	delete(srv.fail, fmt.Sprintf("bytes=%d-%d", chunks[2].Start, chunks[2].End))
 	srv.mu.Unlock()
 
-	if err := pullMulti(ts.URL, cfg, info, conns); err != nil {
+	if err := pullMulti(ts.URL, cfg, info, conns, http.DefaultClient); err != nil {
 		t.Fatalf("second attempt: %v", err)
 	}
 	got, err := os.ReadFile(filepath.Join(dir, "g.mp4"))

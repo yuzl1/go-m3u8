@@ -35,11 +35,13 @@ func main() {
 
 	if *agentMode {
 		agent.RunClient(agent.ClientConfig{
-			Server:      os.Getenv("AGENT_SERVER"),
-			Token:       os.Getenv("AGENT_TOKEN"),
-			Name:        os.Getenv("AGENT_NAME"),
-			Dir:         os.Getenv("AGENT_DIR"),
-			Connections: envInt("AGENT_CONNECTIONS"),
+			Server:            os.Getenv("AGENT_SERVER"),
+			Token:             os.Getenv("AGENT_TOKEN"),
+			Name:              os.Getenv("AGENT_NAME"),
+			Dir:               os.Getenv("AGENT_DIR"),
+			Connections:       envInt("AGENT_CONNECTIONS"),
+			ClashSubscribeURL: os.Getenv("AGENT_CLASH_SUBSCRIBE"),
+			ClashFilter:       os.Getenv("AGENT_CLASH_FILTER"),
 		})
 		return
 	}

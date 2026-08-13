@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +15,8 @@ import (
 	"time"
 
 	"golang.org/x/net/websocket"
+
+	"github.com/yuzl1/go-m3u8/internal/clash"
 )
 
 // ClientConfig configures agent mode.
@@ -23,6 +26,12 @@ type ClientConfig struct {
 	Name        string
 	Dir         string // where received files are stored
 	Connections int    // override chunk connections (0 = use server value)
+
+	// Clash: when set, file pulls go through a per-transfer clash
+	// instance using this subscription — much faster than the direct
+	// international link for agents in China.
+	ClashSubscribeURL string
+	ClashFilter       string // node name regex filter, empty = default
 }
 
 // RunClient runs in agent mode forever: connects to the main server,
@@ -58,18 +67,124 @@ func RunClient(cfg ClientConfig) {
 	}
 	httpBase := scheme + "://" + u.Host
 
+	ac := newAgentClash(cfg)
+
 	for {
-		if err := runOnce(cfg, httpBase); err != nil {
+		if err := runOnce(cfg, httpBase, ac); err != nil {
 			log.Printf("Agent connection error: %v — reconnecting in 5s", err)
 		}
 		time.Sleep(5 * time.Second)
 	}
 }
 
+// agentClash manages the agent-side clash subscription: cached node list,
+// round-robin picker and a port allocator for per-transfer instances.
+type agentClash struct {
+	subscribe string
+	filter    string
+	ports     *clash.PortAllocator
+
+	mu       sync.Mutex
+	yaml     string
+	nodes    []string
+	idx      int
+	expiry   time.Time
+	lastNode string
+}
+
+func newAgentClash(cfg ClientConfig) *agentClash {
+	if cfg.ClashSubscribeURL == "" {
+		return nil
+	}
+	filter := cfg.ClashFilter
+	if filter == "" {
+		filter = clash.DefaultNodeFilter
+	}
+	return &agentClash{
+		subscribe: cfg.ClashSubscribeURL,
+		filter:    filter,
+		ports:     clash.NewPortAllocator(17910, 10),
+	}
+}
+
+// nodes returns the subscription yaml and the filtered node list,
+// refreshing every 30 minutes (stale data is served on fetch errors).
+func (a *agentClash) fetchNodes(ctx context.Context) (string, []string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if time.Now().Before(a.expiry) && a.yaml != "" {
+		return a.yaml, a.nodes, nil
+	}
+	yaml, err := clash.FetchSubscription(ctx, a.subscribe)
+	if err != nil {
+		if a.yaml != "" {
+			return a.yaml, a.nodes, nil // serve stale
+		}
+		return "", nil, err
+	}
+	names, err := clash.ParseProxyNames(yaml)
+	if err != nil {
+		return "", nil, err
+	}
+	names = clash.FilterNodeNames(names, a.filter)
+	if len(names) == 0 {
+		return "", nil, fmt.Errorf("no nodes left after filtering")
+	}
+	a.yaml = yaml
+	a.nodes = names
+	a.expiry = time.Now().Add(30 * time.Minute)
+	return a.yaml, a.nodes, nil
+}
+
+// proxyClient starts a per-transfer clash instance on the next node and
+// returns an HTTP client routed through it, plus a cleanup func.
+func (a *agentClash) proxyClient(ctx context.Context) (*http.Client, func(), error) {
+	yaml, nodes, err := a.fetchNodes(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	a.mu.Lock()
+	node := nodes[a.idx%len(nodes)]
+	a.idx++
+	a.mu.Unlock()
+
+	block, err := clash.ExtractNode(yaml, node)
+	if err != nil {
+		return nil, nil, err
+	}
+	port, err := a.ports.Alloc()
+	if err != nil {
+		return nil, nil, err
+	}
+	instance, err := clash.StartInstance(node, block, port)
+	if err != nil {
+		a.ports.Free(port)
+		return nil, nil, err
+	}
+	proxyURL, err := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
+	if err != nil {
+		instance.Stop()
+		a.ports.Free(port)
+		return nil, nil, err
+	}
+	a.lastNode = node
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy:                 http.ProxyURL(proxyURL),
+			ResponseHeaderTimeout: 60 * time.Second,
+		},
+	}
+	cleanup := func() {
+		instance.Stop()
+		a.ports.Free(port)
+	}
+	return client, cleanup, nil
+}
+
 // runOnce maintains a single control-channel session until it drops.
 // In-flight pulls are awaited before the session returns so a reconnect
 // session never races with leftovers from the previous one.
-func runOnce(cfg ClientConfig, httpBase string) error {
+func runOnce(cfg ClientConfig, httpBase string, ac *agentClash) error {
 	wsURL := cfg.Server + "?token=" + url.QueryEscape(cfg.Token) + "&name=" + url.QueryEscape(cfg.Name)
 	conn, err := websocket.Dial(wsURL, "", "http://localhost/")
 	if err != nil {
@@ -94,7 +209,7 @@ func runOnce(cfg ClientConfig, httpBase string) error {
 			}
 			log.Printf("Received transfer %s: %s (%d bytes)", info.ID, info.FileName, info.Size)
 			wg.Go(func() {
-				err := pullFile(httpBase, cfg, info)
+				err := pullFile(httpBase, cfg, info, ac)
 				reply := &Message{Type: "done", TransferID: info.ID}
 				if err != nil {
 					log.Printf("Transfer %s failed: %v", info.ID, err)
@@ -136,20 +251,38 @@ type chunkStatus struct {
 // Uses parallel chunked (HTTP Range) downloads when possible — much
 // faster than a single connection over high-latency links. Failed
 // attempts keep partial data (chunk manifest) and resume on retry.
-func pullFile(httpBase string, cfg ClientConfig, info *TransferInfo) error {
+// When a clash subscription is configured, the pull goes through a
+// per-transfer clash instance (fast airport route instead of the slow
+// direct international link).
+func pullFile(httpBase string, cfg ClientConfig, info *TransferInfo, ac *agentClash) error {
 	conns := cfg.Connections
 	if conns <= 0 {
 		conns = info.Connections
 	}
-	if conns <= 1 || info.Size <= 0 {
-		return pullSingle(httpBase, cfg, info)
+
+	client := http.DefaultClient
+	cleanup := func() {}
+	if ac != nil {
+		pc, clean, err := ac.proxyClient(context.Background())
+		if err != nil {
+			log.Printf("Transfer %s: clash proxy unavailable (%v) — using direct link", info.ID, err)
+		} else {
+			client = pc
+			cleanup = clean
+			log.Printf("Transfer %s via clash node %q", info.ID, ac.lastNode)
+		}
 	}
-	if err := pullMulti(httpBase, cfg, info, conns); err != nil {
+	defer cleanup()
+
+	if conns <= 1 || info.Size <= 0 {
+		return pullSingle(httpBase, cfg, info, client)
+	}
+	if err := pullMulti(httpBase, cfg, info, conns, client); err != nil {
 		if strings.Contains(err.Error(), "server ignored range") {
 			// Server doesn't support ranged pulls; start single from zero.
 			os.Remove(filepath.Join(cfg.Dir, info.FileName+".part"))
 			os.Remove(filepath.Join(cfg.Dir, info.FileName+".part.json"))
-			return pullSingle(httpBase, cfg, info)
+			return pullSingle(httpBase, cfg, info, client)
 		}
 		return err
 	}
@@ -184,7 +317,7 @@ func saveManifest(path string, m *chunkManifest) {
 
 // pullSingle downloads the whole file over one connection, resuming from
 // the valid prefix of a previous attempt when the manifest allows.
-func pullSingle(httpBase string, cfg ClientConfig, info *TransferInfo) error {
+func pullSingle(httpBase string, cfg ClientConfig, info *TransferInfo, client *http.Client) error {
 	part := filepath.Join(cfg.Dir, info.FileName+".part")
 	final := filepath.Join(cfg.Dir, info.FileName)
 	manifestPath := part + ".json"
@@ -220,7 +353,7 @@ func pullSingle(httpBase string, cfg ClientConfig, info *TransferInfo) error {
 			return reqErr
 		}
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", offset))
-		resp, err = http.DefaultClient.Do(req)
+		resp, err = client.Do(req)
 		if err == nil && resp.StatusCode != http.StatusPartialContent {
 			resp.Body.Close()
 			return fmt.Errorf("HTTP %d (range not supported)", resp.StatusCode)
@@ -271,7 +404,7 @@ func pullSingle(httpBase string, cfg ClientConfig, info *TransferInfo) error {
 
 // pullMulti downloads the file in parallel chunks over N connections,
 // resuming chunks already completed in a previous attempt.
-func pullMulti(httpBase string, cfg ClientConfig, info *TransferInfo, conns int) error {
+func pullMulti(httpBase string, cfg ClientConfig, info *TransferInfo, conns int, client *http.Client) error {
 	part := filepath.Join(cfg.Dir, info.FileName+".part")
 	final := filepath.Join(cfg.Dir, info.FileName)
 	manifestPath := part + ".json"
@@ -328,7 +461,7 @@ func pullMulti(httpBase string, cfg ClientConfig, info *TransferInfo, conns int)
 		go func(idx int) {
 			defer wg.Done()
 			c := &chunks[idx]
-			if err := pullChunk(httpBase, cfg, info, out, c.Start, c.End); err != nil {
+			if err := pullChunk(httpBase, cfg, info, out, c.Start, c.End, client); err != nil {
 				errs <- fmt.Errorf("chunk %d-%d: %w", c.Start, c.End, err)
 				return
 			}
@@ -390,7 +523,7 @@ func (w *offsetWriter) Write(p []byte) (int, error) {
 }
 
 // pullChunk downloads one byte range with retries.
-func pullChunk(httpBase string, cfg ClientConfig, info *TransferInfo, out *os.File, start, end int64) error {
+func pullChunk(httpBase string, cfg ClientConfig, info *TransferInfo, out *os.File, start, end int64, client *http.Client) error {
 	fileURL := httpBase + "/agent/files/" + info.ID + "?token=" + url.QueryEscape(cfg.Token)
 	var lastErr error
 	for range 3 {
@@ -399,7 +532,7 @@ func pullChunk(httpBase string, cfg ClientConfig, info *TransferInfo, out *os.Fi
 			return err
 		}
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := client.Do(req)
 		if err != nil {
 			lastErr = err
 			continue

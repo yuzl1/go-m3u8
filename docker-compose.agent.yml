@@ -23,6 +23,10 @@ services:
       - AGENT_TOKEN=替换为主服务页面显示的Token
       - AGENT_NAME=home-agent
       - AGENT_DIR=/downloads
+      # 可选：传输也走 clash 机场线路（推荐——直连国际线路通常很慢）
+      - AGENT_CLASH_SUBSCRIBE=https://xxx.com/api/v1/client/subscribe?token=xxx
+      # 可选：多连接分块并发数（默认取主服务配置，越大对高延迟线路提速越明显）
+      # - AGENT_CONNECTIONS=8
     volumes:
       - ./downloads:/downloads
     restart: unless-stopped

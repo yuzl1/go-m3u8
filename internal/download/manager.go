@@ -47,7 +47,7 @@ type Manager struct {
 	// process + node + port, so concurrent downloads are fully isolated.
 	clashRunMu   sync.Mutex
 	clashNodeIdx int // round-robin node picker
-	clashPorts   *portAllocator
+	clashPorts   *clash.PortAllocator
 
 	// Concurrency control: buffered channel as semaphore.
 	sem chan struct{}
@@ -67,7 +67,7 @@ func NewManager(cfgStore *config.Store, tasksFile string) *Manager {
 		subs:       make(map[chan *Task]struct{}),
 		cfgStore:   cfgStore,
 		tasksFile:  tasksFile,
-		clashPorts: newPortAllocator(7910, 20),
+		clashPorts: clash.NewPortAllocator(7910, 20),
 	}
 	// Default max concurrent = 3; tightened by config.
 	m.sem = make(chan struct{}, 3)
@@ -428,37 +428,6 @@ func (s *ClashSession) Release() {
 	if s != nil && s.release != nil {
 		s.release()
 	}
-}
-
-// portAllocator hands out proxy ports from a fixed range.
-type portAllocator struct {
-	mu   sync.Mutex
-	free []int
-}
-
-func newPortAllocator(start, n int) *portAllocator {
-	free := make([]int, n)
-	for i := range n {
-		free[i] = start + i
-	}
-	return &portAllocator{free: free}
-}
-
-func (p *portAllocator) Alloc() (int, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if len(p.free) == 0 {
-		return 0, fmt.Errorf("no free clash proxy ports")
-	}
-	port := p.free[0]
-	p.free = p.free[1:]
-	return port, nil
-}
-
-func (p *portAllocator) Free(port int) {
-	p.mu.Lock()
-	p.free = append(p.free, port)
-	p.mu.Unlock()
 }
 
 // ClashInfo returns cached clash state for the UI status display.
