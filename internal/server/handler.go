@@ -165,20 +165,20 @@ func (h *Handler) Download(w http.ResponseWriter, r *http.Request) {
 	// Merge extra headers from JSON post.
 	maps.Copy(headers, req.Headers)
 
-	saveName, translated := h.resolveSaveName(r, &req)
+	// NOTE: no translation here — the task is created immediately so a slow
+	// or failing translation service never delays the download start (the
+	// site's m3u8 URLs carry an expiry timestamp). Translation happens in
+	// the download pipeline, before N_m3u8DL-RE actually starts.
+	saveName := h.resolveSaveName(&req)
 
 	task := h.Manager.Submit(req.URL, saveName, headers, req.BaseURL, req.SaveDir)
-	if translated {
-		task.OriginalName = req.Title
-		task.Translated = true
-	}
 	log.Printf("New download task: id=%s url=%s title=%q", task.ID, task.URL, task.Title)
 	writeJSON(w, http.StatusAccepted, task)
 }
 
-// resolveSaveName picks the filename source per config, strips site
-// suffixes ("Title | SiteName"), and optionally translates the result.
-func (h *Handler) resolveSaveName(r *http.Request, req *downloadReq) (string, bool) {
+// resolveSaveName picks the filename source per config and strips site
+// suffixes ("Title | SiteName").
+func (h *Handler) resolveSaveName(req *downloadReq) string {
 	cfg := h.Config.Get()
 
 	saveName := ""
@@ -213,31 +213,7 @@ func (h *Handler) resolveSaveName(r *http.Request, req *downloadReq) (string, bo
 		saveName = strings.TrimSpace(saveName[:i])
 	}
 
-	// Optional filename translation (English -> Chinese etc.).
-	// Generous timeout + retries: the free Google endpoint can be slow.
-	translated := false
-	if cfg.TranslateEnabled && saveName != "" {
-		var zh string
-		var err error
-		for attempt := 0; attempt < 3; attempt++ {
-			ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-			zh, err = translate.Translate(ctx, saveName, cfg.TranslateTarget, cfg.TranslateAPIURL)
-			cancel()
-			if err == nil && zh != "" {
-				break
-			}
-			log.Printf("Translation attempt %d failed for %q: %v", attempt+1, saveName, err)
-		}
-		if err == nil && zh != "" {
-			log.Printf("Translated filename %q -> %q", saveName, zh)
-			saveName = zh
-			translated = true
-		} else {
-			log.Printf("Filename translation failed for %q: %v (using original)", saveName, err)
-		}
-	}
-
-	return saveName, translated
+	return saveName
 }
 
 // ListTasks returns all download tasks.

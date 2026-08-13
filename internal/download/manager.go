@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/yuzl1/go-m3u8/internal/config"
+	"github.com/yuzl1/go-m3u8/internal/translate"
 )
 
 // StatusChange is broadcast when a task changes state.
@@ -281,8 +282,47 @@ func (m *Manager) dispatch() {
 	}
 }
 
+// translateFilename translates a task filename per config, with a
+// generous timeout and retries. Returns "" and false on failure.
+func translateFilename(text string, cfg *config.Config) (string, bool) {
+	var lastErr error
+	for attempt := range 3 {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		zh, err := translate.Translate(ctx, text, cfg.TranslateTarget, cfg.TranslateAPIURL)
+		cancel()
+		if err == nil && zh != "" {
+			return zh, true
+		}
+		lastErr = err
+		log.Printf("Translation attempt %d failed for %q: %v", attempt+1, text, err)
+	}
+	log.Printf("Filename translation failed for %q: %v (using original)", text, lastErr)
+	return "", false
+}
+
 // enqueue blocks on the semaphore, then runs the download.
 func (m *Manager) enqueue(task *Task) {
+	cfg := m.cfgStore.Get()
+
+	// Filename translation happens HERE, in the pipeline — not in the HTTP
+	// handler — so a slow or failing translation service never delays task
+	// creation. Sites often expire their m3u8 URLs quickly; the download
+	// must be able to start immediately.
+	if cfg.TranslateEnabled && task.Title != "" && !task.Translated {
+		task.Status = "pending"
+		task.Progress = "翻译文件名中..."
+		task.OriginalName = task.Title
+		m.broadcast <- task
+
+		if zh, ok := translateFilename(task.Title, cfg); ok {
+			task.Title = zh
+			task.Translated = true
+			log.Printf("Task %s filename translated: %q -> %q", task.ID, task.OriginalName, zh)
+		}
+		task.Progress = ""
+		m.broadcast <- task
+	}
+
 	m.sem <- struct{}{}
 	defer func() { <-m.sem }()
 
@@ -291,7 +331,6 @@ func (m *Manager) enqueue(task *Task) {
 		return
 	}
 
-	cfg := m.cfgStore.Get()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
