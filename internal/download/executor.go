@@ -114,9 +114,10 @@ func BuildCommand(cfg *config.Config, task *Task, proxy string) (string, []strin
 		args = append(args, "--base-url", baseURL)
 	}
 
-	// HTTP proxy for this attempt (rotated by the caller)
+	// HTTP proxy for this attempt (rotated by the caller).
+	// N_m3u8DL-RE's flag is --custom-proxy (not --proxy).
 	if proxy != "" {
-		args = append(args, "--proxy", proxy)
+		args = append(args, "--custom-proxy", proxy)
 	}
 
 	// Headers: merge task headers with default headers
