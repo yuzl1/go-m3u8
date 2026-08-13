@@ -198,19 +198,55 @@ func ExtractSecret(yamlText string) string {
 }
 
 // SanitizePayload ensures the pushed clash config has an inbound mixed
-// port and an external-controller reachable from other containers.
+// port and an external-controller reachable from other containers. It
+// also disables geo database auto-download and rewrites rules to avoid
+// GEOIP lookups — the sidecar only runs delay tests, and downloading
+// GeoIP.dat from GitHub fails on networks that cannot reach it (e.g.
+// servers inside China), which breaks rule evaluation entirely.
 func SanitizePayload(yamlText string) string {
 	lines := strings.Split(yamlText, "\n")
+
+	// Pass 1: find the first proxy-group name to use as the catch-all target.
+	groupName := "DIRECT"
+	inGroups := false
+	for _, line := range lines {
+		t := strings.TrimSpace(line)
+		if t == "proxy-groups:" {
+			inGroups = true
+			continue
+		}
+		if inGroups {
+			if strings.HasPrefix(t, "- name:") {
+				groupName = strings.TrimSpace(strings.TrimPrefix(t, "- name:"))
+				groupName = strings.Trim(groupName, `"'`)
+				break
+			}
+			if t != "" && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
+				inGroups = false // left the section
+			}
+		}
+	}
+
+	// Pass 2: rebuild the config.
 	var out []string
 	hasMixedPort := false
 	hasPort := false
 	controllerSeen := false
+	geoSeen := false
+	geodataSeen := false
+	skippingRules := false
 
 	strip := func(s string) string { return strings.TrimSpace(s) }
 
 	for _, line := range lines {
 		t := strip(line)
+		// Top-level section change ends the rules-skip.
+		if skippingRules && t != "" && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
+			skippingRules = false
+		}
 		switch {
+		case skippingRules:
+			continue // drop GEOIP rules
 		case strings.HasPrefix(t, "mixed-port:"):
 			hasMixedPort = true
 			out = append(out, line)
@@ -221,6 +257,18 @@ func SanitizePayload(yamlText string) string {
 			// Force 0.0.0.0 so the app container can reach the API.
 			out = append(out, "external-controller: 0.0.0.0:9090")
 			controllerSeen = true
+		case strings.HasPrefix(t, "geo-auto-update:"):
+			out = append(out, "geo-auto-update: false")
+			geoSeen = true
+		case strings.HasPrefix(t, "geodata-mode:"):
+			out = append(out, "geodata-mode: false")
+			geodataSeen = true
+		case t == "rules:":
+			// Replace all rules with a single catch-all through the
+			// first proxy group — no GEOIP lookups, no MMDB needed.
+			out = append(out, "rules:")
+			out = append(out, "  - MATCH,"+groupName)
+			skippingRules = true
 		default:
 			out = append(out, line)
 		}
@@ -231,6 +279,12 @@ func SanitizePayload(yamlText string) string {
 	}
 	if !controllerSeen {
 		out = append(out, "external-controller: 0.0.0.0:9090")
+	}
+	if !geoSeen {
+		out = append(out, "geo-auto-update: false")
+	}
+	if !geodataSeen {
+		out = append(out, "geodata-mode: false")
 	}
 	return strings.Join(out, "\n")
 }

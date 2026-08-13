@@ -260,3 +260,40 @@ func TestSanitizePayload(t *testing.T) {
 		t.Errorf("mixed-port added despite existing port: %s", out)
 	}
 }
+
+func TestSanitizePayloadRewritesRules(t *testing.T) {
+	yaml := `mixed-port: 7890
+proxies:
+  - name: 香港 01
+    type: ss
+    server: a.com
+    port: 1
+    cipher: aes-128-gcm
+    password: p
+proxy-groups:
+  - name: 🚀 节点选择
+    type: select
+    proxies: [香港 01]
+rules:
+  - GEOIP,CN,DIRECT
+  - MATCH,🚀 节点选择
+`
+	out := SanitizePayload(yaml)
+	for _, want := range []string{
+		"geo-auto-update: false",
+		"geodata-mode: false",
+		"  - MATCH,🚀 节点选择",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "GEOIP") {
+		t.Errorf("GEOIP rule not stripped:\n%s", out)
+	}
+	// Without any proxy-group, fall back to DIRECT.
+	out2 := SanitizePayload("proxies: []\nrules:\n  - GEOIP,CN,DIRECT")
+	if !strings.Contains(out2, "  - MATCH,DIRECT") {
+		t.Errorf("expected MATCH,DIRECT fallback:\n%s", out2)
+	}
+}
