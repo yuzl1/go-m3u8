@@ -354,6 +354,14 @@ func (m *Manager) clashHealthyNodes(cfg *config.Config) ([]string, string, error
 		}
 	}
 
+	// Drop airport info entries (套餐到期/剩余流量/故障转移...) — they
+	// are not usable nodes.
+	filterPattern := cfg.ClashNodeFilter
+	if filterPattern == "" {
+		filterPattern = clash.DefaultNodeFilter
+	}
+	healthy = clash.FilterNodeNames(healthy, filterPattern)
+
 	if len(healthy) == 0 {
 		// Nothing passed the test; keep all nodes rather than failing
 		// (the test itself may have been blocked).

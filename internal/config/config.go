@@ -52,6 +52,10 @@ type Config struct {
 	// v2ray links auto-converted). Refreshed on save and hourly.
 	ClashSubscribeURL string `json:"clash_subscribe_url"`
 
+	// ClashNodeFilter: regex of node names to exclude from rotation
+	// (airport info entries like 套餐到期/剩余流量). Empty = default.
+	ClashNodeFilter string `json:"clash_node_filter"`
+
 	// Filename handling: which cat-catch field becomes the saved name,
 	// and optional translation of the filename (e.g. English -> Chinese).
 	FilenameSource    string `json:"filename_source"`    // auto | title | fullFileName

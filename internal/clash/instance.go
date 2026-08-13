@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -42,6 +43,30 @@ func ExtractNode(yamlText, nodeName string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("node %q not found in clash config", nodeName)
+}
+
+// DefaultNodeFilter drops airport-subscription info entries that are not
+// real nodes: 套餐到期 / 剩余流量 / 距离下次重置 / 故障转移 etc.
+const DefaultNodeFilter = `(?i)套餐|到期|剩余|流量|重置|故障|转移|订阅|测速|公告|官网|群组|客服`
+
+// FilterNodeNames drops names matching the regex pattern. Empty pattern
+// or an invalid regex returns the list unchanged.
+func FilterNodeNames(names []string, pattern string) []string {
+	if pattern == "" {
+		return names
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return names
+	}
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		if re.MatchString(n) {
+			continue
+		}
+		out = append(out, n)
+	}
+	return out
 }
 
 // ParseProxyNames extracts the names of all entries in the `proxies:`

@@ -501,6 +501,10 @@ AGENT_DIR=/downloads</div>
           <label>API 密钥（留空自动从配置读取）</label>
           <input name="clash_secret" type="password" placeholder="自动提取">
         </div>
+        <div class="form-group">
+          <label>节点名过滤正则（过滤套餐到期/剩余流量等假节点，留空用默认）</label>
+          <input name="clash_node_filter" placeholder="(?i)套餐|到期|剩余|流量|重置|故障|转移|订阅|测速|公告|官网|群组|客服">
+        </div>
       </div>
       <div class="form-group" style="margin-bottom:12px">
         <label>Clash 订阅地址（推荐：填了就不用手动粘贴配置，保存时立即拉取，每小时自动更新）</label>

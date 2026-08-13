@@ -173,6 +173,31 @@ func TestExtractNode(t *testing.T) {
 	}
 }
 
+func TestFilterNodeNames(t *testing.T) {
+	names := []string{
+		"香港 IEPL 01",
+		"套餐到期：2026-09-01",
+		"剩余流量：100GB",
+		"故障转移",
+		"距离下次重置：30天",
+		"日本 02",
+	}
+	got := FilterNodeNames(names, DefaultNodeFilter)
+	if len(got) != 2 || got[0] != "香港 IEPL 01" || got[1] != "日本 02" {
+		t.Fatalf("filtered = %v", got)
+	}
+
+	// Empty pattern = no filtering.
+	if len(FilterNodeNames(names, "")) != len(names) {
+		t.Fatal("empty pattern should not filter")
+	}
+
+	// Invalid regex = no filtering (never breaks rotation).
+	if len(FilterNodeNames(names, "([invalid")) != len(names) {
+		t.Fatal("invalid regex should not filter")
+	}
+}
+
 func TestParseProxyNames(t *testing.T) {
 	yaml := `proxies:
   - name: 节点A
