@@ -32,6 +32,8 @@ type Task struct {
 	OutputFile    string            `json:"output_file,omitempty"`
 	Synced        bool              `json:"synced,omitempty"`
 	SyncedTo      string            `json:"synced_to,omitempty"`
+	OriginalName  string            `json:"original_name,omitempty"` // pre-translation name
+	Translated    bool              `json:"translated,omitempty"`    // filename was translated
 	Error         string            `json:"error,omitempty"`
 	CreatedAt     time.Time         `json:"created_at"`
 	Headers       map[string]string `json:"headers,omitempty"`

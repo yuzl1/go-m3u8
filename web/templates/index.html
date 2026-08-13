@@ -711,9 +711,10 @@ function taskCard(t) {
   const showBar = ['pending','downloading','merging','done'].includes(t.status);
   return `<div class="task-card st-${t.status}">
     <div class="task-head">
-      <span class="task-title" title="${esc(t.title || '未命名')}">🎬 ${esc(t.title || '未命名')}</span>
+      <span class="task-title" title="${esc(t.title || '未命名')}">🎬 ${esc(t.title || '未命名')} ${t.translated ? '🌐' : ''}</span>
       <span class="badge badge-${t.status}">${statusText(t.status)}</span>
     </div>
+    ${t.translated && t.original_name ? `<div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">原名: ${esc(t.original_name)}</div>` : ''}
     <div class="task-url" title="${esc(t.url)}">🔗 ${esc(t.url)}</div>
     ${showBar ? `<div class="task-progress">
       <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
