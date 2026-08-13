@@ -149,7 +149,9 @@ func Run(ctx context.Context, cfg *config.Config, task *Task, statusCh chan<- *T
 	exe, args := BuildCommand(cfg, task)
 	saveDir := resolveSaveDir(cfg, task)
 
-	task.Log = "== Command ==\n" + exe + " " + strings.Join(args, " ") + "\n\n"
+	// NOTE: += preserves any log content written before Run (e.g. the
+	// translation diagnostics from the download pipeline).
+	task.Log += "== Command ==\n" + exe + " " + strings.Join(args, " ") + "\n\n"
 
 	var lastErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {

@@ -283,8 +283,8 @@ func (m *Manager) dispatch() {
 }
 
 // translateFilename translates a task filename per config, with a
-// generous timeout and retries. Returns "" and false on failure.
-func translateFilename(text string, cfg *config.Config) (string, bool) {
+// generous timeout and retries.
+func translateFilename(text string, cfg *config.Config) (string, error) {
 	var lastErr error
 	for attempt := range 3 {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -296,13 +296,12 @@ func translateFilename(text string, cfg *config.Config) (string, bool) {
 		})
 		cancel()
 		if err == nil && zh != "" {
-			return zh, true
+			return zh, nil
 		}
 		lastErr = err
 		log.Printf("Translation attempt %d failed for %q: %v", attempt+1, text, err)
 	}
-	log.Printf("Filename translation failed for %q: %v (using original)", text, lastErr)
-	return "", false
+	return "", fmt.Errorf("all 3 attempts failed for %q: %w", text, lastErr)
 }
 
 // enqueue blocks on the semaphore, then runs the download.
@@ -313,19 +312,28 @@ func (m *Manager) enqueue(task *Task) {
 	// handler — so a slow or failing translation service never delays task
 	// creation. Sites often expire their m3u8 URLs quickly; the download
 	// must be able to start immediately.
+	// Every outcome is recorded in the task log so it can be diagnosed
+	// from the web UI (任务卡片 → 日志).
 	if cfg.TranslateEnabled && task.Title != "" && !task.Translated {
 		task.Status = "pending"
 		task.Progress = "翻译文件名中..."
 		task.OriginalName = task.Title
+		task.Log += fmt.Sprintf("== Translation ==\nprovider=%s target=%s source=%q\n",
+			cfg.TranslateProvider, cfg.TranslateTarget, task.Title)
 		m.broadcast <- task
 
-		if zh, ok := translateFilename(task.Title, cfg); ok {
+		zh, err := translateFilename(task.Title, cfg)
+		if err == nil {
 			task.Title = zh
 			task.Translated = true
-			log.Printf("Task %s filename translated: %q -> %q", task.ID, task.OriginalName, zh)
+			task.Log += fmt.Sprintf("translated: %q -> %q\n\n", task.OriginalName, zh)
+		} else {
+			task.Log += fmt.Sprintf("FAILED: %v (using original name)\n\n", err)
 		}
 		task.Progress = ""
 		m.broadcast <- task
+	} else if !task.Translated {
+		task.Log += fmt.Sprintf("== Translation ==\nskipped (translate_enabled=%v)\n\n", cfg.TranslateEnabled)
 	}
 
 	m.sem <- struct{}{}
