@@ -87,10 +87,31 @@ func BuildInstanceConfig(nodeName, nodeBlock string, port int) string {
 	return b.String()
 }
 
+// Instance wraps a running per-task mihomo process plus its temp dir so
+// callers can clean up both.
+type Instance struct {
+	Cmd *exec.Cmd
+	Dir string // temp dir holding the generated config (remove on stop)
+}
+
+// Stop kills the process and removes its temp dir.
+func (i *Instance) Stop() {
+	if i == nil {
+		return
+	}
+	if i.Cmd != nil && i.Cmd.Process != nil {
+		i.Cmd.Process.Kill()
+		i.Cmd.Wait()
+	}
+	if i.Dir != "" {
+		os.RemoveAll(i.Dir)
+	}
+}
+
 // StartInstance launches a dedicated mihomo process for one node,
-// listening on the given port. Returns the process once the proxy port
+// listening on the given port. Returns the instance once the proxy port
 // accepts connections.
-func StartInstance(nodeName, nodeBlock string, port int) (*exec.Cmd, error) {
+func StartInstance(nodeName, nodeBlock string, port int) (*Instance, error) {
 	bin, err := exec.LookPath("mihomo")
 	if err != nil {
 		return nil, fmt.Errorf("mihomo binary not found: %w", err)
@@ -116,10 +137,11 @@ func StartInstance(nodeName, nodeBlock string, port int) (*exec.Cmd, error) {
 		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 200*time.Millisecond)
 		if err == nil {
 			conn.Close()
-			return cmd, nil
+			return &Instance{Cmd: cmd, Dir: dir}, nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	cmd.Process.Kill()
+	os.RemoveAll(dir)
 	return nil, fmt.Errorf("mihomo instance on port %d did not start in time", port)
 }

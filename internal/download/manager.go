@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -367,7 +366,7 @@ func (m *Manager) startTaskClash(cfg *config.Config, nodes []string) (*ClashSess
 	if err != nil {
 		return nil, err
 	}
-	proc, err := clash.StartInstance(node, block, port)
+	instance, err := clash.StartInstance(node, block, port)
 	if err != nil {
 		m.clashPorts.Free(port)
 		return nil, err
@@ -375,14 +374,10 @@ func (m *Manager) startTaskClash(cfg *config.Config, nodes []string) (*ClashSess
 	s := &ClashSession{
 		Node:  node,
 		Proxy: fmt.Sprintf("http://127.0.0.1:%d", port),
-		proc:  proc,
 		port:  port,
 	}
 	s.release = func() {
-		if proc.Process != nil {
-			proc.Process.Kill()
-			proc.Wait()
-		}
+		instance.Stop() // kills the process + removes its temp dir
 		m.clashPorts.Free(port)
 	}
 	return s, nil
@@ -392,7 +387,6 @@ func (m *Manager) startTaskClash(cfg *config.Config, nodes []string) (*ClashSess
 type ClashSession struct {
 	Node    string
 	Proxy   string
-	proc    *exec.Cmd
 	port    int
 	release func()
 }
