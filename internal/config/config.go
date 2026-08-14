@@ -38,6 +38,11 @@ type Config struct {
 	// video must never be a 2-segment playlist.
 	MinSegments int `json:"min_segments"`
 
+	// AppendURLParams: pass the input URL's query params (u/s/e tokens)
+	// to every segment request — required by sites that validate the
+	// token per segment (bondagetea-style).
+	AppendURLParams bool `json:"append_url_params"`
+
 	// Clash integration: import a clash config (paste YAML in the UI),
 	// pushed to a mihomo sidecar container; each download task rotates
 	// to the next node of the selector group.

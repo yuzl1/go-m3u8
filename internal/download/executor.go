@@ -94,6 +94,12 @@ func BuildCommand(cfg *config.Config, task *Task, proxy string) (string, []strin
 		args = append(args, "--check-segments-count", "false")
 	}
 
+	// Append the input URL's query params to segment requests — sites
+	// like bondagetea validate the u/s/e token per segment.
+	if cfg.AppendURLParams {
+		args = append(args, "--append-url-params")
+	}
+
 	// Auto select
 	if cfg.AutoSelect {
 		args = append(args, "--auto-select")
