@@ -354,7 +354,13 @@ h2 {
 <!-- Tasks Tab -->
 <div id="tab-downloads" class="tab-content active">
   <div class="card">
-    <h2>下载任务 <span style="font-size:12px;color:var(--text-secondary);font-weight:normal" id="task-count"></span></h2>
+    <h2>下载任务</h2>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+      <button class="tab-btn active" data-task-filter="all">全部</button>
+      <button class="tab-btn" data-task-filter="active">下载中</button>
+      <button class="tab-btn" data-task-filter="done">已完成</button>
+      <button class="tab-btn" data-task-filter="failed">失败</button>
+    </div>
     <div id="task-list" class="task-list"></div>
   </div>
   <div class="card files-section">
@@ -759,6 +765,31 @@ document.getElementById('quick-form').addEventListener('submit', async (e) => {
 });
 
 // ---- Task Rendering (card layout) ----
+let taskFilter = 'all';
+
+// Filter buttons above the task list.
+document.querySelectorAll('[data-task-filter]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    taskFilter = btn.dataset.taskFilter;
+    document.querySelectorAll('[data-task-filter]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    renderTasks();
+  });
+});
+
+function filteredTasks() {
+  switch (taskFilter) {
+    case 'active':
+      return tasks.filter(t => ['pending', 'downloading', 'merging'].includes(t.status));
+    case 'done':
+      return tasks.filter(t => t.status === 'done');
+    case 'failed':
+      return tasks.filter(t => t.status === 'failed' || t.status === 'cancelled');
+    default:
+      return tasks;
+  }
+}
+
 function taskCard(t) {
   const pct = Math.min(t.percent || 0, 100);
   const segText = t.total_segments > 0 ? `<span>分片 ${t.done_segments || 0}/${t.total_segments}</span>` : '';
@@ -799,14 +830,24 @@ function taskCard(t) {
 
 function renderTasks() {
   const el = document.getElementById('task-list');
-  const count = document.getElementById('task-count');
-  if (tasks.length === 0) {
-    el.innerHTML = '<div class="empty-state">暂无下载任务。使用猫抓捕获视频或在「快速下载」中手动输入。</div>';
-    count.textContent = '';
+  const visible = filteredTasks();
+  // Update filter button labels with counts.
+  const countOf = (fn) => tasks.filter(fn).length;
+  const labels = {
+    all: `全部 (${tasks.length})`,
+    active: `下载中 (${countOf(t => ['pending','downloading','merging'].includes(t.status))})`,
+    done: `已完成 (${countOf(t => t.status === 'done')})`,
+    failed: `失败 (${countOf(t => t.status === 'failed' || t.status === 'cancelled')})`,
+  };
+  document.querySelectorAll('[data-task-filter]').forEach(btn => {
+    btn.textContent = labels[btn.dataset.taskFilter] || btn.textContent;
+  });
+
+  if (visible.length === 0) {
+    el.innerHTML = `<div class="empty-state">${tasks.length === 0 ? '暂无下载任务。使用猫抓捕获视频或在「快速下载」中手动输入。' : '当前筛选下没有任务。'}</div>`;
     return;
   }
-  count.textContent = `共 ${tasks.length} 个任务`;
-  el.innerHTML = tasks.map(taskCard).reverse().join('');
+  el.innerHTML = visible.map(taskCard).reverse().join('');
 }
 
 function statusText(s) {
