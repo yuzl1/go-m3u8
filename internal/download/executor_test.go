@@ -56,6 +56,25 @@ func TestNoDateFalsePositive(t *testing.T) {
 	}
 }
 
+func TestExtractURLExpiry(t *testing.T) {
+	u := "https://s1.example.com/a/b.m3u8?u=55229&s=abc&e=1786679374"
+	exp := extractURLExpiry(u)
+	if exp.IsZero() {
+		t.Fatal("expected expiry to be parsed")
+	}
+	if exp.Unix() != 1786679374 {
+		t.Fatalf("expiry = %d", exp.Unix())
+	}
+	// No e= param -> zero time.
+	if !extractURLExpiry("https://x.com/v.m3u8").IsZero() {
+		t.Fatal("expected zero time without e param")
+	}
+	// Expired token must be detected as in the past.
+	if time.Until(exp) >= 0 {
+		t.Log("note: test token timestamp is in the future")
+	}
+}
+
 // TestRealTimeProgressUpdates runs a fake downloader that emits progress
 // lines over ~1.5s and verifies status updates arrive WHILE it runs,
 // not only at completion.

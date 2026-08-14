@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -165,9 +166,39 @@ const maxLogBytes = 64 * 1024
 // It streams stdout/stderr, parses progress and sends status updates.
 // Retries up to maxRetries times on failure. After a successful exit it
 // verifies an output file actually appeared in the save directory.
+// extractURLExpiry parses the e=<unix-ts> expiry param common on
+// tokenized video URLs (bondagetea-style). Zero time = no expiry found.
+func extractURLExpiry(rawURL string) time.Time {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return time.Time{}
+	}
+	ts, err := strconv.ParseInt(u.Query().Get("e"), 10, 64)
+	if err != nil || ts <= 0 {
+		return time.Time{}
+	}
+	return time.Unix(ts, 0)
+}
+
 func Run(ctx context.Context, cfg *config.Config, task *Task, statusCh chan<- *Task) error {
 	exe := cfg.Nm3u8dlPath
 	saveDir := resolveSaveDir(cfg, task)
+
+	// Tokenized URLs expire fast — a task queued behind a 2-hour download
+	// starts with a dead URL and hangs at 0% forever. Fail fast instead.
+	if expiry := extractURLExpiry(task.URL); !expiry.IsZero() {
+		remaining := time.Until(expiry)
+		if remaining <= 0 {
+			task.Status = "failed"
+			task.Error = fmt.Sprintf(
+				"URL token 已过期（e=%d，过期于 %s）——排队时间超过了有效期。\n请在猫抓重新捕获后立即发送，不要积压任务。",
+				expiry.Unix(), expiry.Format("15:04:05"))
+			task.Progress = ""
+			notify(statusCh, task)
+			return fmt.Errorf("URL token expired at %s", expiry.Format(time.RFC3339))
+		}
+		task.Log += fmt.Sprintf("== URL Token ==\n剩余有效时间: %s\n\n", remaining.Round(time.Second))
+	}
 
 	// Dedicated clash instance for this task: own node, own port, own
 	// process — fully isolated from concurrent downloads.
