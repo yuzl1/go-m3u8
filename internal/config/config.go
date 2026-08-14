@@ -84,7 +84,7 @@ func DefaultConfig() *Config {
 		AutoSelect:         true,
 		DelAfterDone:       true,
 		Concurrent:         true,
-		MaxConcurrent:      3,
+		MaxConcurrent:      2,
 		DownloadRetryCount: 5,
 		CheckSegments:      true,
 		DefaultHeaders:     map[string]string{},
