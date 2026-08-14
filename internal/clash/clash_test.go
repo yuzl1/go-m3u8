@@ -286,7 +286,7 @@ func TestSanitizePayload(t *testing.T) {
 }
 
 func TestSanitizePayloadRewritesRules(t *testing.T) {
-	yaml := `mixed-port: 7890
+	input := `mixed-port: 7890
 proxies:
   - name: 香港 01
     type: ss
@@ -302,11 +302,11 @@ rules:
   - GEOIP,CN,DIRECT
   - MATCH,🚀 节点选择
 `
-	out := SanitizePayload(yaml)
+	out := SanitizePayload(input)
 	for _, want := range []string{
 		"geo-auto-update: false",
 		"geodata-mode: false",
-		"  - MATCH,🚀 节点选择",
+		"  - MATCH,'🚀 节点选择'",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q:\n%s", want, out)
@@ -315,9 +315,14 @@ rules:
 	if strings.Contains(out, "GEOIP") {
 		t.Errorf("GEOIP rule not stripped:\n%s", out)
 	}
+	// The rewritten config must still be valid YAML.
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(out), &doc); err != nil {
+		t.Errorf("rewritten config is invalid yaml: %v\n%s", err, out)
+	}
 	// Without any proxy-group, fall back to DIRECT.
 	out2 := SanitizePayload("proxies: []\nrules:\n  - GEOIP,CN,DIRECT")
-	if !strings.Contains(out2, "  - MATCH,DIRECT") {
-		t.Errorf("expected MATCH,DIRECT fallback:\n%s", out2)
+	if !strings.Contains(out2, "  - MATCH,'DIRECT'") {
+		t.Errorf("expected MATCH,'DIRECT' fallback:\n%s", out2)
 	}
 }
