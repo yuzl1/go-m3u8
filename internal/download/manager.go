@@ -49,8 +49,11 @@ type Manager struct {
 	clashNodeIdx int // round-robin node picker
 	clashPorts   *clash.PortAllocator
 
-	// Concurrency control: buffered channel as semaphore.
-	sem chan struct{}
+	// Concurrency control: dynamically-resizable counting semaphore.
+	// NOT a channel: the old channel-based semaphore was REPLACED on
+	// config saves, which orphaned tasks blocked on the old channel —
+	// they never started.
+	sem *semaphore
 
 	// Broadcast channel for task status changes.
 	broadcast chan *Task
@@ -69,12 +72,55 @@ func NewManager(cfgStore *config.Store, tasksFile string) *Manager {
 		tasksFile:  tasksFile,
 		clashPorts: clash.NewPortAllocator(7910, 20),
 	}
-	// Default max concurrent = 3; tightened by config.
-	m.sem = make(chan struct{}, 3)
-	m.applySem()
+	m.sem = newSemaphore(3)
+	m.RefreshSem()
 	m.loadTasks()
 	go m.dispatch()
 	return m
+}
+
+// semaphore is a dynamically-resizable counting semaphore. Resizing only
+// adjusts the limit — blocked waiters are never lost.
+type semaphore struct {
+	mu   sync.Mutex
+	cond *sync.Cond
+	n    int
+	max  int
+}
+
+func newSemaphore(max int) *semaphore {
+	s := &semaphore{max: max}
+	s.cond = sync.NewCond(&s.mu)
+	return s
+}
+
+func (s *semaphore) acquire() {
+	s.mu.Lock()
+	for s.n >= s.max {
+		s.cond.Wait()
+	}
+	s.n++
+	s.mu.Unlock()
+}
+
+func (s *semaphore) release() {
+	s.mu.Lock()
+	s.n--
+	if s.n < 0 {
+		s.n = 0
+	}
+	s.cond.Signal()
+	s.mu.Unlock()
+}
+
+func (s *semaphore) setMax(max int) {
+	s.mu.Lock()
+	if max < 1 {
+		max = 1
+	}
+	s.max = max
+	s.cond.Broadcast() // wake waiters if capacity increased
+	s.mu.Unlock()
 }
 
 // loadTasks restores task history from disk. Tasks that were still
@@ -122,20 +168,16 @@ func (m *Manager) saveTasks() {
 	}
 }
 
-func (m *Manager) applySem() {
+// RefreshSem applies a new MaxConcurrent value. The semaphore is
+// dynamically resized — queued tasks keep waiting and are woken if the
+// capacity increased.
+func (m *Manager) RefreshSem() {
 	cfg := m.cfgStore.Get()
 	n := cfg.MaxConcurrent
 	if n <= 0 {
 		n = 3
 	}
-	// Drain and recreate semaphore with new capacity.
-	// This is a best-effort approach; it won't kill running downloads.
-	m.sem = make(chan struct{}, n)
-}
-
-// RefreshSem updates the semaphore capacity from config.
-func (m *Manager) RefreshSem() {
-	m.applySem()
+	m.sem.setMax(n)
 }
 
 // SetOnTaskDone registers a callback invoked after a download succeeds.
@@ -525,8 +567,8 @@ func (m *Manager) enqueue(task *Task) {
 		task.Log += fmt.Sprintf("== Translation ==\nskipped (translate_enabled=%v)\n\n", cfg.TranslateEnabled)
 	}
 
-	m.sem <- struct{}{}
-	defer func() { <-m.sem }()
+	m.sem.acquire()
+	defer m.sem.release()
 
 	// Check if already cancelled before starting.
 	if task.Status == "cancelled" {
