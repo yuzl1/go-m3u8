@@ -136,7 +136,7 @@ func BuildInstanceConfig(nodeName, nodeBlock string, port int) string {
 	b.WriteString("proxy-groups:\n")
 	b.WriteString("  - name: TASK\n")
 	b.WriteString("    type: select\n")
-	fmt.Fprintf(&b, "    proxies: [%s]\n", nodeName)
+	fmt.Fprintf(&b, "    proxies: [%s]\n", yamlQuote(nodeName))
 	b.WriteString("rules:\n")
 	b.WriteString("  - MATCH,TASK\n")
 	return b.String()

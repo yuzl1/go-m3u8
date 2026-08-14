@@ -267,7 +267,7 @@ func SanitizePayload(yamlText string) string {
 			// Replace all rules with a single catch-all through the
 			// first proxy group — no GEOIP lookups, no MMDB needed.
 			out = append(out, "rules:")
-			out = append(out, "  - MATCH,"+groupName)
+			out = append(out, "  - MATCH,"+yamlQuote(groupName))
 			skippingRules = true
 		default:
 			out = append(out, line)

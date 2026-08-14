@@ -154,7 +154,7 @@ func convertV2rayLinks(text string) (string, int) {
 	b.WriteString("    type: select\n")
 	b.WriteString("    proxies:\n")
 	for _, n := range names {
-		b.WriteString("      - " + n + "\n")
+		b.WriteString("      - " + yamlQuote(n) + "\n")
 	}
 	b.WriteString("rules:\n")
 	b.WriteString("  - MATCH,🚀 节点选择\n")

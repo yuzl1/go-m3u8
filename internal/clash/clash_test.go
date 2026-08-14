@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // fakeAPI mimics the mihomo external-controller for tests.
@@ -233,12 +235,34 @@ func TestBuildInstanceConfig(t *testing.T) {
 		"  - name: 香港 IEPL 01",
 		"    type: ss",
 		"    server: hk1.example.com",
-		"    proxies: [香港 IEPL 01]",
+		"    proxies: ['香港 IEPL 01']",
 		"  - MATCH,TASK",
 	} {
 		if !strings.Contains(cfg, want) {
 			t.Errorf("config missing %q:\n%s", want, cfg)
 		}
+	}
+	// The generated config must parse as valid YAML.
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(cfg), &doc); err != nil {
+		t.Fatalf("generated config is invalid yaml: %v\n%s", err, cfg)
+	}
+}
+
+// TestBuildInstanceConfigBracketName guards against node names with
+// brackets breaking the generated flow-sequence YAML (real-world airport
+// node names like "[5x] [直连] [SS] 香港 06").
+func TestBuildInstanceConfigBracketName(t *testing.T) {
+	name := "[5x] [直连] [SS] 香港 06"
+	block := "name: " + yamlQuote(name) + "\ntype: ss\nserver: a.com\nport: 1\ncipher: aes-128-gcm\npassword: p"
+	cfg := BuildInstanceConfig(name, block, 7911)
+
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(cfg), &doc); err != nil {
+		t.Fatalf("bracket node name broke the config: %v\n%s", err, cfg)
+	}
+	if !strings.Contains(cfg, "'"+name+"'") {
+		t.Fatalf("node name not quoted in config:\n%s", cfg)
 	}
 }
 
